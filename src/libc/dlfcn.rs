@@ -6,10 +6,20 @@
 //! `dlfcn.h` (`dlopen()` and friends)
 
 use crate::dyld::{export_c_func, FunctionExports};
-use crate::mem::{ConstPtr, MutVoidPtr, Ptr};
+use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, MutVoidPtr, Ptr};
 use crate::Environment;
 
 const RTLD_DEFAULT: MutVoidPtr = Ptr::from_bits(-2 as _);
+
+#[repr(C)]
+struct DlInfo {
+    dli_fname: ConstPtr<u8>,
+    dli_fbase: ConstVoidPtr,
+    dli_sname: ConstPtr<u8>,
+    dli_saddr: ConstVoidPtr,
+}
+
+unsafe impl crate::mem::SafeRead for DlInfo {}
 
 fn is_known_library(path: &str) -> bool {
     crate::dyld::DYLIB_LIST
@@ -54,8 +64,53 @@ fn dlclose(env: &mut Environment, handle: MutVoidPtr) -> i32 {
     0 // success
 }
 
+fn dladdr(env: &mut Environment, address: ConstVoidPtr, info: MutPtr<DlInfo>) -> i32 {
+    let address = address.to_bits() & !1;
+    let Some(bin) = env.bins.iter().find(|bin| {
+        bin.loaded_segments
+            .iter()
+            .any(|range| range.contains(&address))
+    }) else {
+        return 0;
+    };
+
+    let nearest_symbol = bin
+        .exported_symbols
+        .iter()
+        .filter_map(|(name, &symbol_address)| {
+            let symbol_address_without_thumb_bit = symbol_address & !1;
+            (symbol_address_without_thumb_bit <= address).then_some((
+                name.as_str(),
+                symbol_address,
+                symbol_address_without_thumb_bit,
+            ))
+        })
+        .max_by_key(|&(_, _, symbol_address)| symbol_address);
+
+    let (dli_sname, dli_saddr) = nearest_symbol.map_or(
+        (ConstPtr::null(), ConstVoidPtr::null()),
+        |(name, symbol_address, _)| {
+            (
+                env.mem.alloc_and_write_cstr(name.as_bytes()).cast_const(),
+                Ptr::from_bits(symbol_address),
+            )
+        },
+    );
+    env.mem.write(
+        info,
+        DlInfo {
+            dli_fname: bin.guest_path.cast_const(),
+            dli_fbase: Ptr::from_bits(bin.image_base),
+            dli_sname,
+            dli_saddr,
+        },
+    );
+    1
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(dlopen(_, _)),
     export_c_func!(dlsym(_, _)),
     export_c_func!(dlclose(_)),
+    export_c_func!(dladdr(_, _)),
 ];

@@ -20,7 +20,7 @@
 
 use crate::abi::GuestFunction;
 use crate::fs::{Fs, GuestPath};
-use crate::mem::{GuestUSize, Mem, Ptr};
+use crate::mem::{GuestUSize, Mem, MutPtr, Ptr};
 use mach_object::{
     cpu_subtype_t, vm_prot_t, Bind, BindSymbolType, DyLib, LoadCommand, MachCommand, OFile, Rebase,
     Symbol, SymbolIter, ThreadState, N_ARM_THUMB_DEF, S_LAZY_SYMBOL_POINTERS,
@@ -38,6 +38,12 @@ const VM_PROT_EXECUTE: vm_prot_t = 4;
 pub struct MachO {
     /// Name (for debugging purposes and sorting)
     pub name: String,
+    /// Guest-memory path used by APIs such as `dladdr`.
+    pub guest_path: MutPtr<u8>,
+    /// Address ranges occupied by the loaded segments.
+    pub loaded_segments: Vec<std::ops::Range<u32>>,
+    /// Base address of the first loaded segment.
+    pub image_base: u32,
     /// Paths of dynamic libraries referenced by the binary.
     pub dynamic_libraries: Vec<String>,
     /// Metadata related to sections.
@@ -316,6 +322,8 @@ impl MachO {
         let mut sym_tab_info: Option<(u32, u32, u32, u32)> = None;
         let mut segment_offsets = Vec::new();
         let mut last_segment_end: u32 = 0;
+        let mut loaded_segments = Vec::new();
+        let mut image_base = None;
 
         // Info used for the result
         let mut dynamic_libraries = Vec::new();
@@ -375,6 +383,9 @@ impl MachO {
                     };
 
                     if load_me {
+                        let segment_base = vmaddr + slide;
+                        image_base.get_or_insert(segment_base);
+                        loaded_segments.push(segment_base..segment_base + vmsize);
                         log_dbg!(
                             "reserve {} addr {:#x} size {}",
                             segname,
@@ -680,8 +691,12 @@ impl MachO {
             })
             .collect();
 
+        let guest_path = into_mem.alloc_and_write_cstr(name.as_bytes());
         Ok(MachO {
+            guest_path,
             name,
+            loaded_segments,
+            image_base: image_base.unwrap(),
             dynamic_libraries,
             sections,
             exported_symbols,
@@ -700,14 +715,17 @@ impl MachO {
         into_mem: &mut Mem,
         slide_to_address: u32,
     ) -> Result<MachO, &'static str> {
-        let name = path.as_ref().file_name().unwrap().to_string();
-        Self::load_from_bytes(
-            &fs.read(path.as_ref())
+        let path = path.as_ref();
+        let name = path.file_name().unwrap().to_string();
+        let mut bin = Self::load_from_bytes(
+            &fs.read(path)
                 .map_err(|_| "Could not read executable file")?,
             into_mem,
             name,
             slide_to_address,
-        )
+        )?;
+        bin.guest_path = into_mem.alloc_and_write_cstr(path.as_str().as_bytes());
+        Ok(bin)
     }
 
     /// Get a section by its name (`&str`) or type ([SectionType]).
