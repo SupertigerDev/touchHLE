@@ -32,7 +32,7 @@ impl Clone for IMP {
     fn clone(&self) -> Self {
         match self {
             IMP::Guest(guest_imp) => IMP::Guest(*guest_imp),
-            IMP::Host(_) => unimplemented!(),
+            IMP::Host(host_imp) => IMP::Host(*host_imp),
         }
     }
 }

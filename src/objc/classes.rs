@@ -1094,7 +1094,7 @@ pub(super) fn class_replaceMethod(
     existing
 }
 
-pub(super) fn class_getMethodImplementation(env: &mut Environment, cls: Class, name: SEL) -> IMP {
+pub(crate) fn class_getMethodImplementation(env: &mut Environment, cls: Class, name: SEL) -> IMP {
     if cls == nil {
         return IMP::guest_null();
     }
@@ -1107,10 +1107,16 @@ pub(super) fn class_getMethodImplementation(env: &mut Environment, cls: Class, n
         } = env.objc.borrow(class);
         if methods.contains_key(&name) {
             let method = methods.get(&name).unwrap().clone();
-            assert!(matches!(method, IMP::Guest(_))); // TODO
-            return method;
+            return match method {
+                IMP::Guest(_) => method,
+                IMP::Host(host_imp) => {
+                    let function =
+                        env.dyld
+                            .create_guest_function(&mut env.mem, "objc_method", host_imp);
+                    IMP::Guest(function)
+                }
+            };
         } else if next == nil {
-            // TODO: currently this returns NULL for unimplemented host methods
             return IMP::guest_null();
         }
         class = next;
