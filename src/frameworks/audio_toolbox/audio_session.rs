@@ -21,6 +21,7 @@ const kAudioSessionBadPropertySizeError: OSStatus = fourcc(b"!siz") as _;
 /// Usually a FourCC.
 type AudioSessionPropertyID = u32;
 const kAudioSessionProperty_OtherAudioIsPlaying: AudioSessionPropertyID = fourcc(b"othr");
+const kAudioSessionProperty_OverrideCategoryMixWithOthers: AudioSessionPropertyID = fourcc(b"cmix");
 const kAudioSessionProperty_AudioCategory: AudioSessionPropertyID = fourcc(b"acat");
 const kAudioSessionProperty_CurrentHardwareSampleRate: AudioSessionPropertyID = fourcc(b"chsr");
 const kAudioSessionProperty_CurrentHardwareOutputNumberChannels: AudioSessionPropertyID =
@@ -35,6 +36,7 @@ const kAudioSessionProperty_CurrentHardwareIOBufferDuration: u32 = fourcc(b"chbd
 
 pub struct State {
     audio_session_category: u32,
+    override_category_mix_with_others: u32,
     pub current_hardware_sample_rate: f64,
     pub current_hardware_output_number_channels: u32,
     current_hardware_output_volume: f32,
@@ -46,6 +48,7 @@ impl Default for State {
         State {
             // This is the default value.
             audio_session_category: kAudioSessionCategory_SoloAmbientSound,
+            override_category_mix_with_others: 0,
             // Values taken from an iOS 2 simulator
             current_hardware_sample_rate: 44100.0,
             current_hardware_output_number_channels: 2,
@@ -104,6 +107,10 @@ fn AudioSessionGetProperty(
             let value: u32 = 0;
             env.mem.write(out_data.cast(), value);
         }
+        kAudioSessionProperty_OverrideCategoryMixWithOthers => {
+            let value = state.override_category_mix_with_others;
+            env.mem.write(out_data.cast(), value);
+        }
         kAudioSessionProperty_AudioCategory => {
             let value: u32 = state.audio_session_category;
             env.mem.write(out_data.cast(), value);
@@ -148,6 +155,7 @@ fn AudioSessionSetProperty(
 ) -> OSStatus {
     let required_size: GuestUSize = match in_ID {
         kAudioSessionProperty_AudioCategory => guest_size_of::<u32>(),
+        kAudioSessionProperty_OverrideCategoryMixWithOthers => guest_size_of::<u32>(),
         kAudioSessionProperty_PreferredHardwareIOBufferDuration => guest_size_of::<f32>(),
         kAudioSessionProperty_PreferredHardwareSampleRate => guest_size_of::<f64>(),
         _ => unimplemented!("Unimplemented property ID: {}", debug_fourcc(in_ID)),
@@ -168,6 +176,12 @@ fn AudioSessionSetProperty(
                 .audio_session
                 .current_hardware_sample_rate
         );
+    }
+    if in_ID == kAudioSessionProperty_OverrideCategoryMixWithOthers {
+        env.framework_state
+            .audio_toolbox
+            .audio_session
+            .override_category_mix_with_others = env.mem.read(in_data.cast::<u32>());
     }
 
     let result = 0; // success
@@ -225,6 +239,7 @@ fn AudioSessionRemovePropertyListenerWithUserData(
 fn get_audio_session_property_size(in_ID: AudioSessionPropertyID) -> GuestUSize {
     match in_ID {
         kAudioSessionProperty_OtherAudioIsPlaying => guest_size_of::<u32>(),
+        kAudioSessionProperty_OverrideCategoryMixWithOthers => guest_size_of::<u32>(),
         kAudioSessionProperty_AudioCategory => guest_size_of::<u32>(),
         kAudioSessionProperty_CurrentHardwareSampleRate => guest_size_of::<f64>(),
         kAudioSessionProperty_CurrentHardwareOutputNumberChannels => guest_size_of::<u32>(),
