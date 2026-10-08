@@ -4,7 +4,7 @@ This lists notable changes from release to release, and credits the people who c
 
 Names preceded by an @ are GitHub usernames.
 
-Lists of new working apps are a guideline, not a guarantee of support, and are not comprehensive. Credits for new working apps indicate someone who put a lot of effort into getting that particular app working, but compatibility is always a cumulative collaborative effort. The “Various small contributions” in the changelog often add up in a big way.
+Lists of new working apps are a guideline, not a guarantee of support, and are not comprehensive. Credits for new working apps indicate someone who put a lot of effort into  getting that particular app working, but compatibility is always a cumulative collaborative effort. The “Various small contributions” in the changelog often add up in a big way.
 
 Changes are categorised as follows:
 
