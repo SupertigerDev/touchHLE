@@ -23,6 +23,7 @@ use crate::objc::{
 use crate::Environment;
 
 pub mod ui_navigation_controller;
+pub mod ui_tab_bar_controller;
 
 #[derive(Default)]
 struct UIViewControllerHostObject {
@@ -37,6 +38,12 @@ struct UIViewControllerHostObject {
     /// of the nib by name, may be nil.
     /// `NSBundle*`
     bundle: id,
+    /// The title displayed for this controller.
+    title: id,
+    /// The tab bar item associated with this controller.
+    tab_bar_item: id,
+    /// The tab bar controller containing this controller, if any.
+    tab_bar_controller: id,
 }
 impl HostObject for UIViewControllerHostObject {}
 
@@ -77,7 +84,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())dealloc {
-    let &UIViewControllerHostObject { view, nib_name, bundle } = env.objc.borrow(this);
+    let &UIViewControllerHostObject {
+        view,
+        nib_name,
+        bundle,
+        title,
+        tab_bar_item,
+        ..
+    } = env.objc.borrow(this);
 
     if view != nil {
         set_view_controller(env, view, nil);
@@ -85,6 +99,8 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, view);
     release(env, nib_name);
     release(env, bundle);
+    release(env, title);
+    release(env, tab_bar_item);
 
     env.objc.dealloc_object(this, &mut env.mem);
 }
@@ -176,7 +192,48 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setTitle:(id)title { // NSString *
-    todo_objc_setter!(this, to_rust_string(env, title));
+    retain(env, title);
+    let old_title = std::mem::replace(
+        &mut env.objc.borrow_mut::<UIViewControllerHostObject>(this).title,
+        title,
+    );
+    let tab_bar_item = env
+        .objc
+        .borrow::<UIViewControllerHostObject>(this)
+        .tab_bar_item;
+    if tab_bar_item != nil {
+        let item_title: id = msg![env; tab_bar_item title];
+        if item_title == old_title {
+            () = msg![env; tab_bar_item setTitle:title];
+        }
+    }
+    release(env, old_title);
+}
+- (id)title {
+    env.objc.borrow::<UIViewControllerHostObject>(this).title
+}
+- (id)tabBarItem {
+    env.objc.borrow::<UIViewControllerHostObject>(this).tab_bar_item
+}
+- (())setTabBarItem:(id)item {
+    retain(env, item);
+    let old_item = std::mem::replace(
+        &mut env.objc.borrow_mut::<UIViewControllerHostObject>(this).tab_bar_item,
+        item,
+    );
+    release(env, old_item);
+    let tab_bar_controller = env
+        .objc
+        .borrow::<UIViewControllerHostObject>(this)
+        .tab_bar_controller;
+    if tab_bar_controller != nil {
+        () = msg![env; tab_bar_controller _touchHLE_refreshTabBar];
+    }
+}
+- (id)tabBarController {
+    env.objc
+        .borrow::<UIViewControllerHostObject>(this)
+        .tab_bar_controller
 }
 - (())setEditing:(bool)editing {
     todo_objc_setter!(this, editing);
