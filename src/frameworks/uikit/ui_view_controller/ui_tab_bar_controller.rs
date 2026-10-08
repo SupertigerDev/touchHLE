@@ -372,7 +372,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         (host_object.items.clone(), host_object.buttons.clone())
     };
     for (tab_item, button) in items.iter().zip(buttons.iter()) {
-        () = msg![env; button setSelected:(*tab_item == item)];
+        () = msg![env; *button setSelected:(*tab_item == item)];
     }
 }
 - (())setDelegate:(id)delegate {
@@ -512,7 +512,7 @@ fn layout_tab_bar(env: &mut crate::Environment, tab_bar: id) {
                 height: frame.size.height,
             },
         };
-        () = msg![env; button setFrame:button_frame];
+        () = msg![env; *button setFrame:button_frame];
     }
 }
 
