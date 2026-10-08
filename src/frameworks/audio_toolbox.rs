@@ -58,6 +58,10 @@ pub struct State {
     extended_audio_file: extended_audio_file::State,
 }
 impl State {
+    pub(crate) fn set_current_hardware_sample_rate(&mut self, sample_rate: f64) {
+        self.audio_session.current_hardware_sample_rate = sample_rate;
+    }
+
     pub fn make_al_context_current<'s, 'manager: 's>(
         &'s mut self,
         manager: &'manager mut OpenALManager,

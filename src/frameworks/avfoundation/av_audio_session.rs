@@ -71,6 +71,20 @@ pub const CLASSES: ClassExports = objc_classes! {
     true
 }
 
+- (bool)setPreferredHardwareSampleRate:(f64)sample_rate
+                                 error:(MutPtr<id>)error { // NSError **
+    env.framework_state
+        .audio_toolbox
+        .set_current_hardware_sample_rate(sample_rate);
+    log!(
+        "TODO: [(AVAudioSession *){:?} setPreferredHardwareSampleRate:{} error:{:?}] -> true",
+        this,
+        sample_rate,
+        error
+    );
+    true
+}
+
 @end
 
 };
