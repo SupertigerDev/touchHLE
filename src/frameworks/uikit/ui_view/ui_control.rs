@@ -90,8 +90,6 @@ fn send_actions(env: &mut Environment, this: id, event: id, control_event: UICon
         .collect();
 
     for (target, action) in action_targets {
-        assert!(target != nil); // TODO
-
         () = msg![env; this sendAction:action to:target forEvent:event];
     }
 }
@@ -284,31 +282,36 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())addTarget:(id)target
          action:(SEL)action
 forControlEvents:(UIControlEvents)events {
-    if target == nil {
-        // TODO: when the target is nil, the responder chain is searched for
-        // a suitable target
-        log!(
-            "TODO: [{:?} addTarget:nil action:{:?} forControlEvents:{:?}] (ignored)",
-            target,
-            action,
-            events,
-        );
-        return;
-    }
-    // The target is a *weak* reference!
-
     // The selector must be for a method with zero to two arguments
     let sel_str = action.as_str(&env.mem);
     let colon_count = sel_str.bytes().filter(|&b| b == b':').count();
     assert!([0, 1, 2].contains(&colon_count));
 
+    // The target is a *weak* reference!
     env.objc.borrow_mut::<UIControlHostObject>(this).action_targets.push((target, action, events));
 }
 
 - (())sendAction:(SEL)action
               to:(id)target
         forEvent:(id)event { // UIEvent*
-    assert!(target != nil); // TODO
+    let target = if target == nil {
+        let mut candidate = this;
+        let mut resolved_target = nil;
+        while candidate != nil {
+            let responds: bool = msg![env; candidate respondsToSelector:action];
+            if responds {
+                resolved_target = candidate;
+                break;
+            }
+            candidate = msg![env; candidate nextResponder];
+        }
+        if resolved_target == nil {
+            return;
+        }
+        resolved_target
+    } else {
+        target
+    };
 
     let sel_str = action.as_str(&env.mem);
     let colon_count = sel_str.bytes().filter(|&b| b == b':').count();
