@@ -172,9 +172,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     {
         let host_object = env.objc.borrow_mut::<UITabBarControllerHostObject>(this);
         host_object.view_controllers = new_controllers;
-        if count == 0 {
-            host_object.selected_index = 0;
-        } else if host_object.selected_index >= count {
+        if host_object.selected_index >= count {
             host_object.selected_index = 0;
         }
     }
@@ -372,7 +370,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         (host_object.items.clone(), host_object.buttons.clone())
     };
     for (tab_item, button) in items.iter().zip(buttons.iter()) {
-        () = msg![env; *button setSelected:(*tab_item == item)];
+        () = msg![env; (*button) setSelected:(*tab_item == item)];
     }
 }
 - (())setDelegate:(id)delegate {
@@ -399,7 +397,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setFrame:(CGRect)frame {
-    msg_super![env; this setFrame:frame];
+    () = msg_super![env; this setFrame:frame];
     layout_tab_bar(env, this);
 }
 
@@ -451,9 +449,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg![env; this initWithTitle:title image:nil tag:tag]
 }
 - (())dealloc {
-    let host_object = env.objc.borrow::<UITabBarItemHostObject>(this);
-    release(env, host_object.title);
-    release(env, host_object.image);
+    let (title, image) = {
+        let host_object = env.objc.borrow::<UITabBarItemHostObject>(this);
+        (host_object.title, host_object.image)
+    };
+    release(env, title);
+    release(env, image);
     msg_super![env; this dealloc]
 }
 - (id)title {
@@ -512,7 +513,7 @@ fn layout_tab_bar(env: &mut crate::Environment, tab_bar: id) {
                 height: frame.size.height,
             },
         };
-        () = msg![env; *button setFrame:button_frame];
+        () = msg![env; (*button) setFrame:button_frame];
     }
 }
 
