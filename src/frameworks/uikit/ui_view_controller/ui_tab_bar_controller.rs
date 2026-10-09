@@ -60,6 +60,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
 
+- (id)initWithCoder:(id)coder {
+    let this: id = msg_super![env; this initWithCoder:coder];
+    let key = get_static_str(env, "UIViewControllers");
+    let view_controllers: id = msg![env; coder decodeObjectForKey:key];
+    () = msg![env; this setViewControllers:view_controllers];
+    this
+}
+
 - (())dealloc {
     let host_object = env.objc.borrow_mut::<UITabBarControllerHostObject>(this);
     let view_controllers = std::mem::take(&mut host_object.view_controllers);
@@ -188,7 +196,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setSelectedIndex:(NSUInteger)index {
     let count = env.objc.borrow::<UITabBarControllerHostObject>(this).view_controllers.len();
-    if !(if count == 0 { index == 0 } else { index < count as NSUInteger }) {
+    if count > 0 && index >= count as NSUInteger {
         return;
     }
     if env.objc.borrow::<UITabBarControllerHostObject>(this).selected_index == index {
