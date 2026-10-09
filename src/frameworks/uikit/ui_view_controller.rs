@@ -87,6 +87,18 @@ pub const CLASSES: ClassExports = objc_classes! {
     retain(env, nib_name);
     env.objc.borrow_mut::<UIViewControllerHostObject>(this).nib_name = nib_name;
 
+    let title_key = get_static_str(env, "UITitle");
+    let title: id = msg![env; coder decodeObjectForKey:title_key];
+    if title != nil {
+        () = msg![env; this setTitle:title];
+    }
+
+    let tab_bar_item_key = get_static_str(env, "UITabBarItem");
+    let tab_bar_item: id = msg![env; coder decodeObjectForKey:tab_bar_item_key];
+    if tab_bar_item != nil {
+        () = msg![env; this setTabBarItem:tab_bar_item];
+    }
+
     this
 }
 
@@ -255,6 +267,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setHidesBottomBarWhenPushed:(bool)hides {
     todo_objc_setter!(this, hides);
+}
+- (())setSearchDisplayController:(id)controller { // UISearchDisplayController*
+    todo_objc_setter!(this, controller);
+}
+- (id)searchDisplayController {
+    nil
 }
 - (())setModalTransitionStyle:(UIModalTransitionStyle)style {
     todo_objc_setter!(this, style);

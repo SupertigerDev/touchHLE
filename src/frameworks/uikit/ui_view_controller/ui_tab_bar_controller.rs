@@ -9,7 +9,7 @@ use crate::frameworks::core_graphics::{CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::frameworks::foundation::{ns_array, NSInteger, NSUInteger};
 use crate::frameworks::uikit::ui_view::ui_control::{
-    UIControlEventTouchUpInside, UIControlStateNormal,
+    UIControlEventTouchUpInside, UIControlStateNormal, UIControlStateSelected,
 };
 use crate::frameworks::uikit::ui_view_controller::UIViewControllerHostObject;
 use crate::objc::{
@@ -110,7 +110,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     if created_tab_bar {
         tab_bar = msg_class![env; UITabBar alloc];
         tab_bar = msg![env; tab_bar initWithFrame:tab_bar_frame];
-        let background_color: id = msg_class![env; UIColor whiteColor];
+        let background_color: id = msg_class![env; UIColor blackColor];
         () = msg![env; tab_bar setBackgroundColor:background_color];
         () = msg![env; root_view addSubview:tab_bar];
     } else {
@@ -342,6 +342,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         };
         let button: id = msg_class![env; UIButton alloc];
         let button: id = msg![env; button initWithFrame:frame];
+        let normal_color: id = msg_class![env; UIColor lightGrayColor];
+        () = msg![env; button setTitleColor:normal_color forState:UIControlStateNormal];
+        let selected_color: id = msg_class![env; UIColor whiteColor];
+        () = msg![env; button setTitleColor:selected_color forState:UIControlStateSelected];
         let title: id = msg![env; item title];
         if title != nil {
             () = msg![env; button setTitle:title forState:UIControlStateNormal];

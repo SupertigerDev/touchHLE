@@ -3,14 +3,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-//! `UINavigationController`.
+//! `UINavigationController`, `UINavigationBar` and `UINavigationItem`.
 
 use crate::frameworks::foundation::ns_string::get_static_str;
-use crate::frameworks::foundation::{ns_array, NSUInteger};
+use crate::frameworks::foundation::{ns_array, NSInteger, NSUInteger};
 use crate::objc::{
     autorelease, id, impl_HostObject_with_superclass, msg, msg_super, nil, objc_classes, release,
-    retain, ClassExports, NSZonePtr, SEL,
+    retain, ClassExports, HostObject, NSZonePtr, SEL,
 };
+use crate::todo_objc_setter;
 
 // TODO: navigation bar and toolbar
 // TODO: animations
@@ -25,6 +26,12 @@ struct UINavigationControllerHostObject {
     navigation_stack: Vec<id>,
 }
 impl_HostObject_with_superclass!(UINavigationControllerHostObject);
+
+#[derive(Default)]
+struct UINavigationItemHostObject {
+    title: id,
+}
+impl HostObject for UINavigationItemHostObject {}
 
 pub const CLASSES: ClassExports = objc_classes! {
 
@@ -160,6 +167,150 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setNavigationBarHidden:(bool)_hidden {
     // TODO
+}
+
+@end
+
+// TODO: actually draw the bar, its title and its buttons. For now this only
+// exists so that nibs containing a navigation bar can be loaded.
+@implementation UINavigationBar: UIView
+
+- (())setBarStyle:(NSInteger)style {
+    todo_objc_setter!(this, style);
+}
+
+- (())setTranslucent:(bool)translucent {
+    todo_objc_setter!(this, translucent);
+}
+
+- (())setTintColor:(id)color { // UIColor *
+    todo_objc_setter!(this, color);
+}
+
+- (())setItems:(id)items { // NSArray *
+    todo_objc_setter!(this, items);
+}
+
+- (())setItems:(id)_items
+      animated:(bool)_animated {
+    log!("TODO: [(UINavigationBar*){:?} setItems:animated:]", this);
+}
+
+- (())pushNavigationItem:(id)_item // UINavigationItem *
+                animated:(bool)_animated {
+    log!("TODO: [(UINavigationBar*){:?} pushNavigationItem:animated:]", this);
+}
+
+- (id)popNavigationItemAnimated:(bool)_animated {
+    log!("TODO: [(UINavigationBar*){:?} popNavigationItemAnimated:]", this);
+    nil
+}
+
+@end
+
+@implementation UINavigationItem: NSObject
+
++ (id)allocWithZone:(NSZonePtr)_zone {
+    let host_object = Box::<UINavigationItemHostObject>::default();
+    env.objc.alloc_object(this, host_object, &mut env.mem)
+}
+
+- (id)initWithCoder:(id)coder {
+    let title_key = get_static_str(env, "UITitle");
+    let title: id = msg![env; coder decodeObjectForKey:title_key];
+    msg![env; this initWithTitle:title]
+}
+
+- (id)initWithTitle:(id)title { // NSString *
+    retain(env, title);
+    env.objc.borrow_mut::<UINavigationItemHostObject>(this).title = title;
+    this
+}
+
+- (())dealloc {
+    let title = env.objc.borrow::<UINavigationItemHostObject>(this).title;
+    release(env, title);
+    msg_super![env; this dealloc]
+}
+
+- (id)title {
+    env.objc.borrow::<UINavigationItemHostObject>(this).title
+}
+- (())setTitle:(id)title { // NSString *
+    retain(env, title);
+    let old_title = std::mem::replace(
+        &mut env.objc.borrow_mut::<UINavigationItemHostObject>(this).title,
+        title,
+    );
+    release(env, old_title);
+}
+
+- (())setTitleView:(id)view { // UIView *
+    todo_objc_setter!(this, view);
+}
+- (())setLeftBarButtonItem:(id)item { // UIBarButtonItem *
+    todo_objc_setter!(this, item);
+}
+- (())setRightBarButtonItem:(id)item { // UIBarButtonItem *
+    todo_objc_setter!(this, item);
+}
+- (())setHidesBackButton:(bool)hides {
+    todo_objc_setter!(this, hides);
+}
+
+@end
+
+// TODO: actually display bar button items. For now this only lets apps
+// create them without crashing.
+@implementation UIBarButtonItem: NSObject
+
+- (id)initWithCoder:(id)_coder {
+    this
+}
+- (id)initWithBarButtonSystemItem:(NSInteger)_item
+                           target:(id)_target
+                           action:(SEL)_action {
+    this
+}
+- (id)initWithTitle:(id)_title // NSString *
+              style:(NSInteger)_style
+             target:(id)_target
+             action:(SEL)_action {
+    this
+}
+- (id)initWithImage:(id)_image // UIImage *
+              style:(NSInteger)_style
+             target:(id)_target
+             action:(SEL)_action {
+    this
+}
+- (id)initWithCustomView:(id)_view { // UIView *
+    this
+}
+
+- (())setTitle:(id)title { // NSString *
+    todo_objc_setter!(this, title);
+}
+- (())setStyle:(NSInteger)style {
+    todo_objc_setter!(this, style);
+}
+- (())setEnabled:(bool)enabled {
+    todo_objc_setter!(this, enabled);
+}
+- (())setTarget:(id)target {
+    todo_objc_setter!(this, target);
+}
+- (())setAction:(SEL)action {
+    todo_objc_setter!(this, action);
+}
+- (())setTintColor:(id)color { // UIColor *
+    todo_objc_setter!(this, color);
+}
+
+- (())addTarget:(id)_target
+         action:(SEL)_action
+forControlEvents:(NSUInteger)_events {
+    log!("TODO: [(UIBarButtonItem*){:?} addTarget:action:forControlEvents:]", this);
 }
 
 @end

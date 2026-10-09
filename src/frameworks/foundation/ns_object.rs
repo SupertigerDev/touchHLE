@@ -116,6 +116,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.get_refcount(this).into()
 }
 
+- (id)self {
+    this
+}
+
 - (id)retain {
     log_dbg!("[{:?} retain]", this);
     env.objc.increment_refcount(this);

@@ -75,7 +75,7 @@ type UIControlState = NSUInteger;
 pub const UIControlStateNormal: UIControlState = 0;
 const UIControlStateHighlighted: UIControlState = 1 << 0;
 const UIControlStateDisabled: UIControlState = 1 << 1;
-const UIControlStateSelected: UIControlState = 1 << 2;
+pub const UIControlStateSelected: UIControlState = 1 << 2;
 #[allow(dead_code)]
 const UIControlStateFocused: UIControlState = 1 << 3;
 

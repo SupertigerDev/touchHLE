@@ -26,6 +26,7 @@ pub mod ui_graphics;
 pub mod ui_image;
 pub mod ui_image_picker_controller;
 pub mod ui_local_notification;
+pub mod ui_localized_indexed_collation;
 pub mod ui_nib;
 pub mod ui_pasteboard;
 pub mod ui_responder;
@@ -51,6 +52,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         ui_image_picker_controller::CLASSES,
         ui_local_notification::CLASSES,
         ui_nib::CLASSES,
+        ui_localized_indexed_collation::CLASSES,
         ui_pasteboard::CLASSES,
         ui_responder::CLASSES,
         ui_screen::CLASSES,
@@ -69,6 +71,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         ui_view::ui_picker_view::CLASSES,
         ui_view::ui_scroll_view::CLASSES,
         ui_view::ui_scroll_view::ui_text_view::CLASSES,
+        ui_view::ui_search_bar::CLASSES,
         ui_view::ui_table_view::CLASSES,
         ui_view::ui_web_view::CLASSES,
         ui_view::ui_window::CLASSES,
