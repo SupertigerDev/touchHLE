@@ -6,13 +6,38 @@
 //! `UISegmentedControl`.
 
 use crate::frameworks::core_graphics::CGRect;
-use crate::objc::{id, msg_super, objc_classes, ClassExports};
+use crate::frameworks::foundation::{NSInteger, NSUInteger};
+use crate::objc::{
+    id, impl_HostObject_with_superclass, msg_super, nil, objc_classes, release, retain,
+    ClassExports, NSZonePtr,
+};
+
+struct UISegmentedControlHostObject {
+    superclass: super::UIControlHostObject,
+    selected_segment_index: NSInteger,
+    titles: Vec<id>,
+}
+impl_HostObject_with_superclass!(UISegmentedControlHostObject);
+
+impl Default for UISegmentedControlHostObject {
+    fn default() -> Self {
+        Self {
+            superclass: Default::default(),
+            selected_segment_index: -1,
+            titles: Vec::new(),
+        }
+    }
+}
 
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
 
 @implementation UISegmentedControl: UIControl
+
++ (id)allocWithZone:(NSZonePtr)_zone {
+    env.objc.alloc_object(this, Box::<UISegmentedControlHostObject>::default(), &mut env.mem)
+}
 
 - (id)initWithFrame:(CGRect)frame {
     log!("[(UISegmentedControl*){:?} initWithFrame:{:?}] TODO: Implement UISegmentedControl. The control won't be rendered.", this, frame);
@@ -23,6 +48,52 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)initWithCoder:(id)coder {
     log!("[(UISegmentedControl*){:?} initWithCoder:{:?}] TODO: Implement UISegmentedControl. The control won't be rendered.", this, coder);
     msg_super![env; this initWithCoder:coder]
+}
+
+- (())dealloc {
+    let titles = std::mem::take(
+        &mut env.objc.borrow_mut::<UISegmentedControlHostObject>(this).titles,
+    );
+    for title in titles {
+        release(env, title);
+    }
+    msg_super![env; this dealloc]
+}
+
+- (NSInteger)selectedSegmentIndex {
+    env.objc
+        .borrow::<UISegmentedControlHostObject>(this)
+        .selected_segment_index
+}
+- (())setSelectedSegmentIndex:(NSInteger)index {
+    env.objc
+        .borrow_mut::<UISegmentedControlHostObject>(this)
+        .selected_segment_index = index;
+}
+
+- (NSUInteger)numberOfSegments {
+    env.objc
+        .borrow::<UISegmentedControlHostObject>(this)
+        .titles
+        .len() as NSUInteger
+}
+- (())setTitle:(id)title forSegmentAtIndex:(NSUInteger)index {
+    retain(env, title);
+    let titles = &mut env
+        .objc
+        .borrow_mut::<UISegmentedControlHostObject>(this)
+        .titles;
+    titles.resize_with(index as usize + 1, || nil);
+    let old_title = std::mem::replace(&mut titles[index as usize], title);
+    release(env, old_title);
+}
+- (id)titleForSegmentAtIndex:(NSUInteger)index {
+    env.objc
+        .borrow::<UISegmentedControlHostObject>(this)
+        .titles
+        .get(index as usize)
+        .copied()
+        .unwrap_or(nil)
 }
 
 // TODO: all of it

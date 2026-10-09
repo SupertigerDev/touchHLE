@@ -114,6 +114,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     todo_objc_setter!(this, style);
 }
 
+- (())flashScrollIndicators {
+    log!("TODO: [(UIScrollView*){:?} flashScrollIndicators]", this);
+}
+
 - (())touchesMoved:(id)touches // NSSet* of UITouch*
          withEvent:(id)_event { // UIEvent*
     let scroll_enabled: bool = msg![env; this scrollEnabled];

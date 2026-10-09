@@ -192,7 +192,17 @@ fn objc_msgSend_inner(
     }
 
     let orig_class = super2.unwrap_or_else(|| ObjC::read_isa(receiver, &env.mem));
-    assert!(orig_class != nil);
+    if orig_class == nil {
+        let regs = env.cpu.regs();
+        panic!(
+            "Objective-C message to {:?} with nil isa for selector \"{}\" \
+             at guest PC {:#x} (LR {:#x})!",
+            receiver,
+            selector.as_str(&env.mem),
+            regs[crate::cpu::Cpu::PC],
+            regs[crate::cpu::Cpu::LR],
+        );
+    }
     if !skip_initialize {
         maybe_initialize_class(env, receiver);
     }
@@ -210,9 +220,11 @@ fn objc_msgSend_inner(
                 is_metaclass,
                 ..
             } = class_host_object.as_any().downcast_ref().unwrap();
+            let regs = env.cpu.regs();
 
             panic!(
-                "{} {:?} ({}class \"{}\", {:?}){} does not respond to selector \"{}\"!",
+                "{} {:?} ({}class \"{}\", {:?}){} does not respond to selector \"{}\" \
+                 at guest PC {:#x} (LR {:#x})!",
                 if is_metaclass { "Class" } else { "Object" },
                 receiver,
                 if is_metaclass { "meta" } else { "" },
@@ -224,6 +236,8 @@ fn objc_msgSend_inner(
                     ""
                 },
                 selector.as_str(&env.mem),
+                regs[crate::cpu::Cpu::PC],
+                regs[crate::cpu::Cpu::LR],
             );
         }
 

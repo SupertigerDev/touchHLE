@@ -37,7 +37,7 @@ pub const UIControlEventValueChanged: UIControlEvents = 1 << 12;
 pub type UIControlContentVerticalAlignment = NSInteger;
 const UIControlContentVerticalAlignmentCenter: UIControlContentVerticalAlignment = 0;
 
-struct UIControlHostObject {
+pub(super) struct UIControlHostObject {
     superclass: super::UIViewHostObject,
     enabled: bool,
     selected: bool,

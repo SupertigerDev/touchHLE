@@ -80,6 +80,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     () = msg![env; this setView:view];
 
+    let nib_name_key = get_static_str(env, "UINibName");
+    let nib_name: id = msg![env; coder decodeObjectForKey:nib_name_key];
+    retain(env, nib_name);
+    env.objc.borrow_mut::<UIViewControllerHostObject>(this).nib_name = nib_name;
+
     this
 }
 

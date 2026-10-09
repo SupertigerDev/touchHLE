@@ -448,6 +448,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     // nothing.
 }
 
+- (())setNeedsLayout {
+    // Layout is performed for the whole view hierarchy before each render.
+}
+
 - (id)superview {
     env.objc.borrow::<UIViewHostObject>(this).superview
 }

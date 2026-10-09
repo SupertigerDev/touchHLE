@@ -42,6 +42,7 @@ struct NSThreadHostObject {
     thread_dictionary: id,
     owned: bool,
     finished: bool,
+    cancelled: bool,
     stack_size: NSUInteger,
     tolerate_type_mismatch: bool,
 }
@@ -61,6 +62,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         thread_dictionary: nil,
         owned: false,
         finished: false,
+        cancelled: false,
         stack_size: Mem::SECONDARY_THREAD_DEFAULT_STACK_SIZE,
         tolerate_type_mismatch: false,
     });
@@ -142,6 +144,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         .dyld
         .create_guest_function(&mut env.mem, symb, hf);
 
+    // Keep the thread object alive while its thread is running.
+    retain(env, this);
+
     let attr: MutPtr<pthread_attr_t> = env.mem.alloc(guest_size_of::<pthread_attr_t>()).cast();
     pthread_attr_init(env, attr);
 
@@ -222,8 +227,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (bool)isCancelled {
-    log_dbg!("TODO: [(NSThread *){:?} isCancelled]", this);
-    false
+    env.objc.borrow::<NSThreadHostObject>(this).cancelled
+}
+
+- (())cancel {
+    env.objc.borrow_mut::<NSThreadHostObject>(this).cancelled = true;
 }
 
 - (())dealloc {
@@ -269,9 +277,9 @@ pub fn _touchHLE_NSThreadInvocationHelper(env: &mut Environment, ns_thread_obj: 
     let res = State::get(env).ns_threads.remove(&pthread);
     assert!(res.is_some());
 
+    release(env, ns_thread_obj);
     if owned {
-        // Releasing only if the object was owned
-        // e.g. created with `detachNewThreadSelector:toTarget:withObject:`
+        // Release the ownership from detachNewThreadSelector:toTarget:withObject:.
         release(env, ns_thread_obj);
     }
 
