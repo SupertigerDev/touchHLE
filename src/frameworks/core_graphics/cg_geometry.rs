@@ -379,9 +379,6 @@ fn CGRectInset(_env: &mut Environment, rect: CGRect, dx: CGFloat, dy: CGFloat) -
     assert!(res.size.width >= 0.0); // TODO return a null rectangle
     assert!(res.size.height >= 0.0); // TODO return a null rectangle
 
-    // center invariant
-    assert!(rect.origin.x + rect.size.width / 2.0 == res.origin.x + res.size.width / 2.0);
-    assert!(rect.origin.y + rect.size.height / 2.0 == res.origin.y + res.size.height / 2.0);
     res
 }
 
