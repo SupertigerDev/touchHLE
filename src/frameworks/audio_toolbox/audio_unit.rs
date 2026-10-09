@@ -12,6 +12,9 @@ use std::time::Instant;
 use crate::audio::openal::al_types::{ALuint, ALvoid};
 use crate::audio::openal::{AL_BUFFERS_PROCESSED, AL_PLAYING, AL_SOURCE_STATE};
 
+use super::audio_components::{AURenderCallbackStruct, AudioComponentInstance};
+use super::audio_queue::decode_buffer;
+use super::audio_session;
 use crate::abi::CallFromHost;
 use crate::dyld::FunctionExports;
 use crate::environment::Environment;
@@ -21,15 +24,10 @@ use crate::frameworks::audio_toolbox::audio_queue::{
     is_supported_audio_format, log_if_broken_audio_format,
 };
 use crate::frameworks::carbon_core::{paramErr, OSStatus};
-use crate::frameworks::core_audio_types::AudioStreamBasicDescription;
+use crate::frameworks::core_audio_types::{AudioStreamBasicDescription, AudioTimeStamp, SMPTETime};
 use crate::frameworks::core_foundation::cf_run_loop::CFRunLoopGetMain;
 use crate::frameworks::foundation::ns_run_loop;
 use crate::mem::{guest_size_of, ConstVoidPtr, MutPtr, MutVoidPtr, SafeRead};
-use crate::objc::nil;
-
-use super::audio_components::{AURenderCallbackStruct, AudioComponentInstance};
-use super::audio_queue::decode_buffer;
-use super::audio_session;
 
 pub type AudioUnit = AudioComponentInstance;
 type AudioUnitPropertyID = u32;
@@ -68,6 +66,7 @@ const kAudioUnitErr_PropertyNotInUse: OSStatus = -10850;
 const kAudioOutputUnitProperty_EnableIO: AudioUnitPropertyID = 2003;
 const kAudioUnitRenderAction_PreRender: u32 = 1 << 2;
 const kAudioUnitRenderAction_PostRender: u32 = 1 << 3;
+const kAudioTimeStampSampleTimeValid: u32 = 1;
 
 fn AudioUnitAddRenderNotify(
     env: &mut Environment,
@@ -159,8 +158,12 @@ fn AudioUnitSetProperty(
             assert_eq!(in_data_size, guest_size_of::<AURenderCallbackStruct>());
             let render_callback = env.mem.read(in_data.cast::<AURenderCallbackStruct>());
             host_object.render_callback = Some(render_callback);
+            let AURenderCallbackStruct {
+                input_proc,
+                input_proc_ref_con,
+            } = render_callback;
             result = 0;
-            log!("AudioUnitSetProperty({:?}, SetRenderCallback, scope {:?}, element {:?}, callback {:?}, refcon {:?}) -> 0", in_unit, in_scope, in_element, render_callback.input_proc, render_callback.input_proc_ref_con);
+            log!("AudioUnitSetProperty({:?}, SetRenderCallback, scope {:?}, element {:?}, callback {:?}, refcon {:?}) -> 0", in_unit, in_scope, in_element, input_proc, input_proc_ref_con);
         }
         kAudioUnitProperty_StreamFormat => {
             assert_eq!(in_data_size, guest_size_of::<AudioStreamBasicDescription>());
@@ -169,11 +172,22 @@ fn AudioUnitSetProperty(
             match in_scope {
                 kAudioUnitScope_Global => host_object.global_stream_format = stream_format,
                 kAudioUnitScope_Output => host_object.output_stream_format = Some(stream_format),
-                kAudioUnitScope_Input => host_object.input_stream_format = Some(stream_format),
+                kAudioUnitScope_Input => {
+                    host_object.input_stream_format = Some(stream_format);
+                    host_object
+                        .input_stream_formats
+                        .insert(in_element, stream_format);
+                }
                 _ => unimplemented!("in_scope {}", in_scope),
             };
             result = 0;
-            log_dbg!("AudioUnitSetProperty({:?}, kAudioUnitProperty_StreamFormat, {:?}, {:?}, {:?}, {:?}) -> {:?}", in_unit, in_scope, in_element, stream_format, in_data_size, result);
+            log!(
+                "AudioUnitSetProperty({:?}, StreamFormat, scope {}, element {}): {:?}",
+                in_unit,
+                in_scope,
+                in_element,
+                stream_format
+            );
         }
         kAudioUnitProperty_SampleRate => {
             assert_eq!(in_data_size, guest_size_of::<f64>());
@@ -184,10 +198,14 @@ fn AudioUnitSetProperty(
                 }
                 kAudioUnitScope_Input => {
                     let mut format = host_object
-                        .input_stream_format
+                        .input_stream_formats
+                        .get(&in_element)
+                        .copied()
+                        .or(host_object.input_stream_format)
                         .unwrap_or(host_object.global_stream_format);
                     format.sample_rate = sample_rate;
                     host_object.input_stream_format = Some(format);
+                    host_object.input_stream_formats.insert(in_element, format);
                 }
                 kAudioUnitScope_Output => {
                     let mut format = host_object
@@ -244,7 +262,7 @@ fn AudioUnitGetProperty(
     in_unit: AudioUnit,
     in_id: AudioUnitPropertyID,
     in_scope: AudioUnitScope,
-    _in_element: AudioUnitElement,
+    in_element: AudioUnitElement,
     out_data: MutVoidPtr,
     io_data_size: MutPtr<u32>,
 ) -> OSStatus {
@@ -278,7 +296,12 @@ fn AudioUnitGetProperty(
             let stream_format = match in_scope {
                 kAudioUnitScope_Global => host_object.global_stream_format,
                 kAudioUnitScope_Output => host_object.output_stream_format.unwrap(),
-                kAudioUnitScope_Input => host_object.input_stream_format.unwrap(),
+                kAudioUnitScope_Input => host_object
+                    .input_stream_formats
+                    .get(&in_element)
+                    .copied()
+                    .or(host_object.input_stream_format)
+                    .unwrap(),
                 _ => unimplemented!(),
             };
             env.mem.write(out_data.cast(), stream_format);
@@ -299,7 +322,10 @@ fn AudioUnitGetProperty(
                 }
                 kAudioUnitScope_Input => {
                     host_object
-                        .input_stream_format
+                        .input_stream_formats
+                        .get(&in_element)
+                        .copied()
+                        .or(host_object.input_stream_format)
                         .unwrap_or(host_object.global_stream_format)
                         .sample_rate
                 }
@@ -332,6 +358,14 @@ pub(super) fn AudioUnitSetParameter(
     host_object
         .parameter_values
         .insert((parameter_id, scope, element), value);
+    log!(
+        "AudioUnitSetParameter({:?}, parameter {}, scope {}, element {}) = {}",
+        unit,
+        parameter_id,
+        scope,
+        element,
+        value
+    );
     0
 }
 
@@ -357,6 +391,8 @@ pub(super) fn AudioOutputUnitStart(env: &mut Environment, ci: AudioUnit) -> OSSt
     audio_unit_state.last_render_time = Some(Instant::now());
     audio_unit_state.started = true;
     audio_unit_state.has_logged_first_render = false;
+    audio_unit_state.has_logged_nonzero_render = false;
+    audio_unit_state.sample_time = 0.0;
 
     let result = 0; // Success
     log!(
@@ -400,6 +436,119 @@ pub(super) fn AudioOutputUnitStop(env: &mut Environment, ci: AudioUnit) -> OSSta
     result
 }
 
+pub fn read_normalized_sample(sample: &[u8], format: &AudioStreamBasicDescription) -> f32 {
+    use crate::frameworks::core_audio_types::{
+        kAudioFormatFlagIsFloat, kAudioFormatFlagIsSignedInteger,
+    };
+
+    let format_flags = format.format_flags;
+    let bits_per_channel = format.bits_per_channel;
+    if format_flags & kAudioFormatFlagIsFloat != 0 {
+        let value = f32::from_le_bytes(sample.try_into().unwrap());
+        return if value.is_finite() {
+            value.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+    }
+
+    let signed = format_flags & kAudioFormatFlagIsSignedInteger != 0;
+    match (bits_per_channel, signed) {
+        (8, true) => i8::from_le_bytes(sample.try_into().unwrap()) as f32 / 128.0,
+        (8, false) => (f32::from(sample[0]) - 128.0) / 128.0,
+        (16, true) => i16::from_le_bytes(sample.try_into().unwrap()) as f32 / 32768.0,
+        (16, false) => {
+            (f32::from(u16::from_le_bytes(sample.try_into().unwrap())) - 32768.0) / 32768.0
+        }
+        (32, true) => (i32::from_le_bytes(sample.try_into().unwrap()) as f64 / 2147483648.0) as f32,
+        (32, false) => {
+            ((u32::from_le_bytes(sample.try_into().unwrap()) as f64 - 2147483648.0) / 2147483648.0)
+                as f32
+        }
+        _ => unimplemented!("unsupported PCM sample depth {}", bits_per_channel),
+    }
+}
+
+fn write_normalized_sample(sample: f32, output: &mut [u8], format: &AudioStreamBasicDescription) {
+    use crate::frameworks::core_audio_types::{
+        kAudioFormatFlagIsFloat, kAudioFormatFlagIsSignedInteger,
+    };
+
+    let format_flags = format.format_flags;
+    let bits_per_channel = format.bits_per_channel;
+    let sample = sample.clamp(-1.0, 1.0);
+    if format_flags & kAudioFormatFlagIsFloat != 0 {
+        output.copy_from_slice(&sample.to_le_bytes());
+        return;
+    }
+
+    let signed = format_flags & kAudioFormatFlagIsSignedInteger != 0;
+    match (bits_per_channel, signed) {
+        (8, true) => output.copy_from_slice(&((sample * 128.0).round() as i8).to_le_bytes()),
+        (8, false) => output[0] = (sample * 128.0 + 128.0).round().clamp(0.0, 255.0) as u8,
+        (16, true) => output.copy_from_slice(
+            &((sample * 32768.0).round().clamp(-32768.0, 32767.0) as i16).to_le_bytes(),
+        ),
+        (16, false) => output.copy_from_slice(
+            &((sample * 32768.0 + 32768.0).round().clamp(0.0, 65535.0) as u16).to_le_bytes(),
+        ),
+        (32, true) => output.copy_from_slice(
+            &((sample as f64 * 2147483648.0)
+                .round()
+                .clamp(-2147483648.0, 2147483647.0) as i32)
+                .to_le_bytes(),
+        ),
+        (32, false) => output.copy_from_slice(
+            &((sample as f64 * 2147483648.0 + 2147483648.0)
+                .round()
+                .clamp(0.0, 4294967295.0) as u32)
+                .to_le_bytes(),
+        ),
+        _ => unimplemented!("unsupported PCM sample depth {}", bits_per_channel),
+    }
+}
+
+fn mix_input_into_output(
+    input: &[u8],
+    input_format: &AudioStreamBasicDescription,
+    output: &mut [u8],
+    output_format: &AudioStreamBasicDescription,
+    number_frames: u32,
+    gain: f32,
+) {
+    let input_bytes_per_sample = (input_format.bits_per_channel / 8) as usize;
+    let output_bytes_per_sample = (output_format.bits_per_channel / 8) as usize;
+    let input_channels = input_format.channels_per_frame as usize;
+    let output_channels = output_format.channels_per_frame as usize;
+
+    for frame in 0..number_frames as usize {
+        for output_channel in 0..output_channels {
+            let input_channel = if input_channels == 1 {
+                0
+            } else {
+                output_channel.min(input_channels - 1)
+            };
+            let input_offset = frame * input_format.bytes_per_frame as usize
+                + input_channel * input_bytes_per_sample;
+            let output_offset = frame * output_format.bytes_per_frame as usize
+                + output_channel * output_bytes_per_sample;
+            let input_sample = read_normalized_sample(
+                &input[input_offset..input_offset + input_bytes_per_sample],
+                input_format,
+            );
+            let output_sample = read_normalized_sample(
+                &output[output_offset..output_offset + output_bytes_per_sample],
+                output_format,
+            );
+            write_normalized_sample(
+                output_sample + input_sample * gain,
+                &mut output[output_offset..output_offset + output_bytes_per_sample],
+                output_format,
+            );
+        }
+    }
+}
+
 pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
     if env.bundle.bundle_identifier().starts_with("com.ea.simcity") {
         // If enabled, we have some random crashes inside AURenderCallback ;(
@@ -431,15 +580,19 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         return;
     }
 
-    let Some(render_callback) = audio_unit_host_object.render_callback else {
+    let render_callback = audio_unit_host_object.render_callback;
+    let graph_input_callbacks = audio_unit_host_object.graph_input_callbacks.clone();
+    if render_callback.is_none() && graph_input_callbacks.is_empty() {
         log_dbg!(
             "AudioUnit {:?} is started without a render callback; skipping this render",
             audio_unit
         );
         return;
-    };
+    }
     let render_notifications = audio_unit_host_object.render_notifications.clone();
     let has_logged_first_render = audio_unit_host_object.has_logged_first_render;
+    let has_logged_nonzero_render = audio_unit_host_object.has_logged_nonzero_render;
+    let sample_time = audio_unit_host_object.sample_time;
 
     audio_unit_host_object.is_running_handler = true;
 
@@ -504,12 +657,34 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
 
     // Alloc callback arguments
     let action_flags = env.mem.alloc_and_write(0);
+    let time_stamp = env.mem.alloc_and_write(AudioTimeStamp {
+        sample_time,
+        host_time: 0,
+        rate_scalar: 1.0,
+        world_clock_type: 0,
+        SMPTE_time: SMPTETime {
+            subframes: 0,
+            subframe_divisor: 0,
+            counter: 0,
+            type_: 0,
+            flags: 0,
+            hours: 0,
+            minutes: 0,
+            seconds: 0,
+            frames: 0,
+        },
+        flags: kAudioTimeStampSampleTimeValid,
+        _reserved: 0,
+    });
 
     let (audio_buffer_list, buffer1Data, buffer2Data): (
         MutVoidPtr,
         MutVoidPtr,
         Option<MutVoidPtr>,
-    ) = if input_stream_format.is_some() {
+    ) = if input_stream_format.is_some()
+        || !graph_input_callbacks.is_empty()
+        || env.bundle.bundle_identifier() == "com.upasani.iTablaPro"
+    {
         let bufferData = env.mem.alloc(buffer_size);
         let audio_buffer_list: AudioBufferList<1> = AudioBufferList {
             number_buffers: 1,
@@ -560,7 +735,7 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
             (
                 ref_con,
                 action_flags,
-                nil.cast_void().cast_const(),
+                time_stamp.cast_const(),
                 0u32,
                 number_frames,
                 audio_buffer_list,
@@ -568,21 +743,90 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         );
     }
 
-    let AURenderCallbackStruct {
-        input_proc: inputProc,
-        input_proc_ref_con: inputProcRefCon,
-    } = render_callback;
-    let () = inputProc.call_from_host(
-        env,
-        (
-            inputProcRefCon,
-            action_flags,
-            nil.cast_void().cast_const(),
-            0u32,
-            number_frames,
-            audio_buffer_list,
-        ),
-    );
+    env.mem.write(action_flags, 0);
+    let mut callback_statuses = Vec::new();
+    let mut callback_audio_stats = Vec::new();
+    if graph_input_callbacks.is_empty() {
+        let AURenderCallbackStruct {
+            input_proc,
+            input_proc_ref_con,
+        } = render_callback.unwrap();
+        let callback_status: OSStatus = input_proc.call_from_host(
+            env,
+            (
+                input_proc_ref_con,
+                action_flags,
+                time_stamp.cast_const(),
+                0u32,
+                number_frames,
+                audio_buffer_list,
+            ),
+        );
+        callback_statuses.push((0, callback_status));
+    } else {
+        env.mem
+            .bytes_at_mut(buffer1Data.cast(), buffer_size)
+            .fill(0);
+        for (source_audio_unit, bus, callback, input_format) in &graph_input_callbacks {
+            let parameters = &audio_components::State::get(&mut env.framework_state)
+                .audio_component_instances
+                .get(source_audio_unit)
+                .unwrap()
+                .parameter_values;
+            let gain_db = parameters
+                .get(&(3, kAudioUnitScope_Input, *bus))
+                .copied()
+                .unwrap_or(0.0);
+            let gain = 10.0f32.powf(gain_db / 20.0);
+            env.mem.write(action_flags, 0);
+            let input_buffer_size = number_frames * input_format.bytes_per_frame;
+            let scratch_buffer = env.mem.alloc(input_buffer_size);
+            let audio_buffer_list_for_bus = env.mem.alloc_and_write(AudioBufferList::<1> {
+                number_buffers: 1,
+                buffers: [AudioBuffer {
+                    number_channels: input_format.channels_per_frame,
+                    data_byte_size: input_buffer_size,
+                    data: scratch_buffer,
+                }],
+            });
+            let AURenderCallbackStruct {
+                input_proc,
+                input_proc_ref_con,
+            } = *callback;
+            let callback_status: OSStatus = input_proc.call_from_host(
+                env,
+                (
+                    input_proc_ref_con,
+                    action_flags,
+                    time_stamp.cast_const(),
+                    *bus,
+                    number_frames,
+                    audio_buffer_list_for_bus.cast::<MutVoidPtr>(),
+                ),
+            );
+            callback_statuses.push((*bus, callback_status));
+
+            let input = env
+                .mem
+                .bytes_at(scratch_buffer.cast(), input_buffer_size)
+                .to_vec();
+            let nonzero_bytes = input.iter().filter(|&&byte| byte != 0).count();
+            if nonzero_bytes > 0 {
+                callback_audio_stats.push((*bus, nonzero_bytes, *input_format));
+            }
+            let output = env.mem.bytes_at_mut(buffer1Data.cast(), buffer_size);
+            mix_input_into_output(
+                &input,
+                input_format,
+                output,
+                &stream_format,
+                number_frames,
+                gain,
+            );
+            env.mem.free(scratch_buffer.cast_void());
+            env.mem.free(audio_buffer_list_for_bus.cast());
+        }
+    }
 
     if !has_logged_first_render && number_frames > 0 {
         let nonzero_bytes = env
@@ -592,10 +836,11 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
             .filter(|&&byte| byte != 0)
             .count();
         log!(
-            "AudioUnit {:?} first render: {} frames at {} Hz, {} of {} output bytes nonzero",
+            "AudioUnit {:?} first render: {} frames at {} Hz, callback statuses {:?}, {} of {} output bytes nonzero",
             audio_unit,
             number_frames,
             sample_rate,
+            callback_statuses,
             nonzero_bytes,
             buffer_size
         );
@@ -604,6 +849,35 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
             .get_mut(&audio_unit)
             .unwrap()
             .has_logged_first_render = true;
+        if nonzero_bytes > 0 {
+            audio_components::State::get(&mut env.framework_state)
+                .audio_component_instances
+                .get_mut(&audio_unit)
+                .unwrap()
+                .has_logged_nonzero_render = true;
+        }
+    } else if !has_logged_nonzero_render && number_frames > 0 {
+        let nonzero_bytes = env
+            .mem
+            .bytes_at(buffer1Data.cast(), buffer_size)
+            .iter()
+            .filter(|&&byte| byte != 0)
+            .count();
+        if nonzero_bytes > 0 {
+            log!(
+                "AudioUnit {:?} produced nonzero audio: {} of {} bytes, callback statuses {:?}, per-bus (bus, nonzero bytes, stream format) {:?}",
+                audio_unit,
+                nonzero_bytes,
+                buffer_size,
+                callback_statuses,
+                callback_audio_stats
+            );
+            audio_components::State::get(&mut env.framework_state)
+                .audio_component_instances
+                .get_mut(&audio_unit)
+                .unwrap()
+                .has_logged_nonzero_render = true;
+        }
     }
 
     env.mem
@@ -614,7 +888,7 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
             (
                 ref_con,
                 action_flags,
-                nil.cast_void().cast_const(),
+                time_stamp.cast_const(),
                 0u32,
                 number_frames,
                 audio_buffer_list,
@@ -665,6 +939,7 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
 
     // TODO: Do something with the action flags?
     env.mem.free(action_flags.cast_void());
+    env.mem.free(time_stamp.cast_void());
 
     env.mem.free(buffer1Data.cast_void());
     if let Some(buffer2Data) = buffer2Data {
@@ -680,6 +955,7 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
     // Reborrow as mutable to update the last render time
 
     audio_unit_host_object.last_render_time = Some(now);
+    audio_unit_host_object.sample_time += f64::from(number_frames);
     audio_unit_host_object.is_running_handler = false;
 }
 

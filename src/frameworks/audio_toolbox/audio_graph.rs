@@ -45,13 +45,51 @@ struct Node {
     description: AudioComponentDescription,
     component: AudioComponent,
     audio_unit: Option<AudioComponentInstance>,
-    input_callback: Option<AURenderCallbackStruct>,
+    input_callbacks: Vec<(u32, AURenderCallbackStruct)>,
 }
 
 #[derive(Copy, Clone)]
 struct Connection {
+    source_node: AUNode,
+    source_output: u32,
     destination_node: AUNode,
     destination_input: u32,
+}
+
+fn upstream_render_callbacks(
+    graph: &AudioGraph,
+    output_node: AUNode,
+) -> Vec<(AUNode, u32, AURenderCallbackStruct)> {
+    let mut pending = vec![output_node];
+    let mut visited = Vec::new();
+
+    let mut callbacks = Vec::new();
+    while let Some(node_id) = pending.pop() {
+        if visited.contains(&node_id) {
+            continue;
+        }
+        visited.push(node_id);
+
+        let Some(node) = graph.nodes.iter().find(|node| node.id == node_id) else {
+            continue;
+        };
+        callbacks.extend(
+            node.input_callbacks
+                .iter()
+                .map(|&(bus, callback)| (node_id, bus, callback)),
+        );
+
+        pending.extend(
+            graph
+                .connections
+                .iter()
+                .filter(|edge| edge.destination_node == node_id)
+                .map(|edge| edge.source_node),
+        );
+    }
+
+    callbacks.sort_by_key(|&(node_id, bus, _)| (node_id, bus));
+    callbacks
 }
 
 fn NewAUGraph(env: &mut Environment, out_graph: MutPtr<AUGraph>) -> OSStatus {
@@ -79,6 +117,9 @@ fn AUGraphAddNode(
         return paramErr;
     }
     let description = env.mem.read(description);
+    let component_type = description.component_type;
+    let component_sub_type = description.component_sub_type;
+    let component_manufacturer = description.component_manufacturer;
     let Some(graph) = env
         .framework_state
         .audio_toolbox
@@ -97,10 +138,16 @@ fn AUGraphAddNode(
         description,
         component: MutPtr::null(),
         audio_unit: None,
-        input_callback: None,
+        input_callbacks: Vec::new(),
     });
     env.mem.write(out_node, id);
-    log_dbg!("AUGraphAddNode() -> {}", id);
+    log!(
+        "AUGraphAddNode() -> {} (type {:#x}, subtype {:#x}, manufacturer {:#x})",
+        id,
+        component_type,
+        component_sub_type,
+        component_manufacturer
+    );
     0
 }
 
@@ -198,6 +245,8 @@ fn AUGraphConnectNodeInput(
         return paramErr;
     }
     let connection = Connection {
+        source_node,
+        source_output: _source_output,
         destination_node,
         destination_input,
     };
@@ -206,6 +255,14 @@ fn AUGraphConnectNodeInput(
             || existing.destination_input != destination_input
     });
     audio_graph.connections.push(connection);
+    log!(
+        "AUGraphConnectNodeInput({:?}): {}:{} -> {}:{}",
+        graph,
+        source_node,
+        _source_output,
+        destination_node,
+        destination_input
+    );
     0
 }
 
@@ -235,14 +292,14 @@ fn AUGraphSetNodeInputCallback(
     env: &mut Environment,
     graph: AUGraph,
     node_id: AUNode,
-    _input_number: u32,
+    input_number: u32,
     callback: ConstPtr<AURenderCallbackStruct>,
 ) -> OSStatus {
     if callback.is_null() {
         return paramErr;
     }
     let callback = env.mem.read(callback);
-    let Some(audio_unit) = env
+    let Some(_) = env
         .framework_state
         .audio_toolbox
         .audio_graph
@@ -253,30 +310,27 @@ fn AUGraphSetNodeInputCallback(
     else {
         return paramErr;
     };
-    let Some(host_unit) = env
-        .framework_state
-        .audio_toolbox
-        .audio_components
-        .audio_component_instances
-        .get_mut(&audio_unit)
-    else {
-        return paramErr;
-    };
-    host_unit.render_callback = Some(callback);
     if let Some(node) = env
         .framework_state
         .audio_toolbox
         .audio_graph
         .audio_graph_node_mut(graph, node_id)
     {
-        node.input_callback = Some(callback);
+        node.input_callbacks.retain(|&(bus, _)| bus != input_number);
+        node.input_callbacks.push((input_number, callback));
+        node.input_callbacks.sort_by_key(|&(bus, _)| bus);
     }
+    let AURenderCallbackStruct {
+        input_proc,
+        input_proc_ref_con,
+    } = callback;
     log!(
-        "AUGraphSetNodeInputCallback({:?}, node {}): callback {:?}, refcon {:?}",
+        "AUGraphSetNodeInputCallback({:?}, node {} input {}): callback {:?}, refcon {:?}",
         graph,
         node_id,
-        callback.input_proc,
-        callback.input_proc_ref_con
+        input_number,
+        input_proc,
+        input_proc_ref_con
     );
     0
 }
@@ -344,23 +398,115 @@ fn AUGraphStart(env: &mut Environment, graph: AUGraph) -> OSStatus {
     if AUGraphInitialize(env, graph) != 0 {
         return paramErr;
     }
-    let output_units: Vec<_> = env
+    let graph_state = env
         .framework_state
         .audio_toolbox
         .audio_graph
         .graphs
         .get(&graph)
-        .unwrap()
+        .unwrap();
+    let nodes: Vec<_> = graph_state
         .nodes
         .iter()
-        .filter(|node| {
-            node.description.component_type == audio_components::kAudioUnitType_Output
-                && node.description.component_sub_type
-                    == audio_components::kAudioUnitSubType_RemoteIO
+        .map(|node| {
+            (
+                node.id,
+                node.description.component_type,
+                node.description.component_sub_type,
+                node.audio_unit,
+                node.input_callbacks.len(),
+            )
         })
-        .filter_map(|node| node.audio_unit)
         .collect();
-    for audio_unit in output_units {
+    let connections: Vec<_> = graph_state
+        .connections
+        .iter()
+        .map(|edge| {
+            (
+                edge.source_node,
+                edge.source_output,
+                edge.destination_node,
+                edge.destination_input,
+            )
+        })
+        .collect();
+    log!(
+        "AUGraphStart({:?}) nodes {:?}, connections {:?}",
+        graph,
+        nodes,
+        connections
+    );
+    let output_units: Vec<_> = {
+        let audio_graph = env
+            .framework_state
+            .audio_toolbox
+            .audio_graph
+            .graphs
+            .get(&graph)
+            .unwrap();
+        audio_graph
+            .nodes
+            .iter()
+            .filter(|node| {
+                node.description.component_type == audio_components::kAudioUnitType_Output
+                    && node.description.component_sub_type
+                        == audio_components::kAudioUnitSubType_RemoteIO
+            })
+            .filter_map(|node| {
+                let audio_unit = node.audio_unit?;
+                let callbacks = upstream_render_callbacks(audio_graph, node.id);
+                Some((node.id, audio_unit, callbacks))
+            })
+            .collect()
+    };
+    for (output_node, audio_unit, callbacks) in output_units {
+        if !callbacks.is_empty() {
+            let graph_inputs: Vec<_> = callbacks
+                .iter()
+                .map(|&(source_node, bus, callback)| {
+                    let source_audio_unit = env
+                        .framework_state
+                        .audio_toolbox
+                        .audio_graph
+                        .graphs
+                        .get(&graph)
+                        .and_then(|audio_graph| {
+                            audio_graph.nodes.iter().find(|node| node.id == source_node)
+                        })
+                        .and_then(|node| node.audio_unit)
+                        .expect("mixer input callback node has no audio unit");
+                    let source = env
+                        .framework_state
+                        .audio_toolbox
+                        .audio_components
+                        .audio_component_instances
+                        .get(&source_audio_unit)
+                        .expect("mixer input callback audio unit is missing");
+                    let stream_format = source
+                        .input_stream_formats
+                        .get(&bus)
+                        .copied()
+                        .or(source.input_stream_format)
+                        .unwrap_or(source.global_stream_format);
+                    (source_audio_unit, bus, callback, stream_format)
+                })
+                .collect();
+            let unit = env
+                .framework_state
+                .audio_toolbox
+                .audio_components
+                .audio_component_instances
+                .get_mut(&audio_unit)
+                .unwrap();
+            unit.graph_input_callbacks = graph_inputs;
+            log!(
+                "AUGraphStart({:?}): routing {} input callbacks from node {} to output node {}",
+                graph,
+                callbacks.len(),
+                callbacks[0].0,
+                output_node
+            );
+        }
         let status = super::audio_unit::AudioOutputUnitStart(env, audio_unit);
         if status != 0 {
             return status;
