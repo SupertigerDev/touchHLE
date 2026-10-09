@@ -271,6 +271,13 @@ fn AUGraphSetNodeInputCallback(
     {
         node.input_callback = Some(callback);
     }
+    log!(
+        "AUGraphSetNodeInputCallback({:?}, node {}): callback {:?}, refcon {:?}",
+        graph,
+        node_id,
+        callback.input_proc,
+        callback.input_proc_ref_con
+    );
     0
 }
 

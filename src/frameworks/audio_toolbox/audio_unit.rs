@@ -66,6 +66,63 @@ const kAudioUnitProperty_FactoryPresets: AudioUnitPropertyID = 24;
 const kAudioUnitErr_PropertyNotInUse: OSStatus = -10850;
 
 const kAudioOutputUnitProperty_EnableIO: AudioUnitPropertyID = 2003;
+const kAudioUnitRenderAction_PreRender: u32 = 1 << 2;
+const kAudioUnitRenderAction_PostRender: u32 = 1 << 3;
+
+fn AudioUnitAddRenderNotify(
+    env: &mut Environment,
+    in_unit: AudioUnit,
+    in_proc: audio_components::AURenderCallback,
+    in_ref_con: ConstVoidPtr,
+) -> OSStatus {
+    let Some(audio_unit) = audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .get_mut(&in_unit)
+    else {
+        return paramErr;
+    };
+
+    audio_unit.render_notifications.push((in_proc, in_ref_con));
+    log!(
+        "AudioUnitAddRenderNotify({:?}, {:?}, {:?}) -> 0",
+        in_unit,
+        in_proc,
+        in_ref_con
+    );
+    0
+}
+
+fn AudioUnitRemoveRenderNotify(
+    env: &mut Environment,
+    in_unit: AudioUnit,
+    in_proc: audio_components::AURenderCallback,
+    in_ref_con: ConstVoidPtr,
+) -> OSStatus {
+    let Some(audio_unit) = audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .get_mut(&in_unit)
+    else {
+        return paramErr;
+    };
+    let Some(index) = audio_unit
+        .render_notifications
+        .iter()
+        .position(|&(proc, ref_con)| {
+            proc.addr_with_thumb_bit() == in_proc.addr_with_thumb_bit() && ref_con == in_ref_con
+        })
+    else {
+        return paramErr;
+    };
+
+    audio_unit.render_notifications.remove(index);
+    log!(
+        "AudioUnitRemoveRenderNotify({:?}, {:?}, {:?}) -> 0",
+        in_unit,
+        in_proc,
+        in_ref_con
+    );
+    0
+}
 
 pub(super) fn AudioUnitInitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
     let run_loop = CFRunLoopGetMain(env);
@@ -103,7 +160,7 @@ fn AudioUnitSetProperty(
             let render_callback = env.mem.read(in_data.cast::<AURenderCallbackStruct>());
             host_object.render_callback = Some(render_callback);
             result = 0;
-            log_dbg!("AudioUnitSetProperty({:?}, kAudioUnitProperty_SetRenderCallback, {:?}, {:?}, {:?}, {:?}) -> {:?}", in_unit, in_scope, in_element, render_callback, in_data_size, result);
+            log!("AudioUnitSetProperty({:?}, SetRenderCallback, scope {:?}, element {:?}, callback {:?}, refcon {:?}) -> 0", in_unit, in_scope, in_element, render_callback.input_proc, render_callback.input_proc_ref_con);
         }
         kAudioUnitProperty_StreamFormat => {
             assert_eq!(in_data_size, guest_size_of::<AudioStreamBasicDescription>());
@@ -299,9 +356,17 @@ pub(super) fn AudioOutputUnitStart(env: &mut Environment, ci: AudioUnit) -> OSSt
     audio_unit_state.al_source = Some(source);
     audio_unit_state.last_render_time = Some(Instant::now());
     audio_unit_state.started = true;
+    audio_unit_state.has_logged_first_render = false;
 
     let result = 0; // Success
-    log_dbg!("AudioOutputUnitStart({:?}) -> {:?}", ci, result);
+    log!(
+        "AudioOutputUnitStart({:?}) -> {:?}; render callback configured: {}, notifications: {}, stream format: {:?}",
+        ci,
+        result,
+        audio_unit_state.render_callback.is_some(),
+        audio_unit_state.render_notifications.len(),
+        audio_unit_state.global_stream_format
+    );
     result
 }
 
@@ -366,6 +431,16 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         return;
     }
 
+    let Some(render_callback) = audio_unit_host_object.render_callback else {
+        log_dbg!(
+            "AudioUnit {:?} is started without a render callback; skipping this render",
+            audio_unit
+        );
+        return;
+    };
+    let render_notifications = audio_unit_host_object.render_notifications.clone();
+    let has_logged_first_render = audio_unit_host_object.has_logged_first_render;
+
     audio_unit_host_object.is_running_handler = true;
 
     let input_stream_format = audio_unit_host_object.input_stream_format;
@@ -385,11 +460,13 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
     };
     let sample_rate = if let Some(input_stream_format) = input_stream_format {
         input_stream_format.sample_rate
-    } else {
-        assert!(output_stream_format.is_some());
-        // TODO: confirm that this is the general behaviour
-        // (and not only RE4 thing)
+    } else if output_stream_format.is_some() {
+        // Output units use the current hardware rate when the app configures
+        // an output stream format. If it does not, use the configured global
+        // stream format instead.
         current_hardware_sample_rate
+    } else {
+        stream_format.sample_rate
     };
 
     assert!(is_supported_audio_format(&stream_format));
@@ -474,11 +551,27 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         )
     };
 
-    // Run render callback
+    // Run render notifications and callback.
+    env.mem
+        .write(action_flags, kAudioUnitRenderAction_PreRender);
+    for &(notify, ref_con) in &render_notifications {
+        let _: OSStatus = notify.call_from_host(
+            env,
+            (
+                ref_con,
+                action_flags,
+                nil.cast_void().cast_const(),
+                0u32,
+                number_frames,
+                audio_buffer_list,
+            ),
+        );
+    }
+
     let AURenderCallbackStruct {
         input_proc: inputProc,
         input_proc_ref_con: inputProcRefCon,
-    } = audio_unit_host_object.render_callback.unwrap();
+    } = render_callback;
     let () = inputProc.call_from_host(
         env,
         (
@@ -490,6 +583,44 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
             audio_buffer_list,
         ),
     );
+
+    if !has_logged_first_render && number_frames > 0 {
+        let nonzero_bytes = env
+            .mem
+            .bytes_at(buffer1Data.cast(), buffer_size)
+            .iter()
+            .filter(|&&byte| byte != 0)
+            .count();
+        log!(
+            "AudioUnit {:?} first render: {} frames at {} Hz, {} of {} output bytes nonzero",
+            audio_unit,
+            number_frames,
+            sample_rate,
+            nonzero_bytes,
+            buffer_size
+        );
+        audio_components::State::get(&mut env.framework_state)
+            .audio_component_instances
+            .get_mut(&audio_unit)
+            .unwrap()
+            .has_logged_first_render = true;
+    }
+
+    env.mem
+        .write(action_flags, kAudioUnitRenderAction_PostRender);
+    for &(notify, ref_con) in &render_notifications {
+        let _: OSStatus = notify.call_from_host(
+            env,
+            (
+                ref_con,
+                action_flags,
+                nil.cast_void().cast_const(),
+                0u32,
+                number_frames,
+                audio_buffer_list,
+            ),
+        );
+    }
 
     let at_state = &mut env.framework_state.audio_toolbox;
     let context = at_state
@@ -560,4 +691,6 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(AudioUnitSetParameter(_, _, _, _, _, _)),
     export_c_func!(AudioOutputUnitStart(_)),
     export_c_func!(AudioOutputUnitStop(_)),
+    export_c_func!(AudioUnitAddRenderNotify(_, _, _)),
+    export_c_func!(AudioUnitRemoveRenderNotify(_, _, _)),
 ];

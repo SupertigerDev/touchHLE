@@ -174,6 +174,14 @@ fn objc_storeWeak(env: &mut Environment, location: MutVoidPtr, object: id) -> id
     object
 }
 
+fn objc_storeStrong(env: &mut Environment, location: MutVoidPtr, object: id) {
+    assert!(!location.is_null());
+    objc_retain(env, object);
+    let old_object: id = env.mem.read(location.cast());
+    env.mem.write(location.cast(), object);
+    objc_release(env, old_object);
+}
+
 fn objc_setProperty_atomic(
     env: &mut Environment,
     object: id,
@@ -324,6 +332,7 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(objc_retainAutoreleaseReturnValue(_)),
     export_c_func!(objc_autoreleaseReturnValue(_)),
     export_c_func!(objc_unsafeClaimAutoreleasedReturnValue(_)),
+    export_c_func!(objc_storeStrong(_, _)),
     export_c_func!(objc_storeWeak(_, _)),
     export_c_func!(objc_initWeak(_, _)),
     export_c_func!(objc_loadWeakRetained(_)),

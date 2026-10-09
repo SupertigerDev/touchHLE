@@ -16,7 +16,7 @@ use crate::export_c_func;
 use crate::frameworks::carbon_core::{paramErr, OSStatus};
 use crate::frameworks::core_audio_types::{
     fourcc, kAudioFormatFlagIsAlignedHigh, kAudioFormatFlagIsFloat, kAudioFormatFlagIsPacked,
-    kAudioFormatFlagIsSignedInteger, kAudioFormatLinearPCM, AudioStreamBasicDescription,
+    kAudioFormatLinearPCM, AudioStreamBasicDescription,
 };
 use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, SafeRead};
 
@@ -48,6 +48,8 @@ pub struct AudioComponentInstanceHostObject {
     pub input_stream_format: Option<AudioStreamBasicDescription>,
     pub output_stream_format: Option<AudioStreamBasicDescription>,
     pub render_callback: Option<AURenderCallbackStruct>,
+    pub render_notifications: Vec<(AURenderCallback, ConstVoidPtr)>,
+    pub has_logged_first_render: bool,
     pub last_render_time: Option<Instant>,
     pub al_source: Option<ALuint>,
     pub is_running_handler: bool,
@@ -79,12 +81,11 @@ impl Default for AudioComponentInstanceHostObject {
                 sample_rate: 44100.0,
                 format_id: kAudioFormatLinearPCM,
                 format_flags: kAudioFormatFlagIsFloat
-                    | kAudioFormatFlagIsSignedInteger
                     | kAudioFormatFlagIsPacked
                     | kAudioFormatFlagIsAlignedHigh,
-                bytes_per_packet: 4,
+                bytes_per_packet: 8,
                 frames_per_packet: 1,
-                bytes_per_frame: 4,
+                bytes_per_frame: 8,
                 channels_per_frame: 2,
                 bits_per_channel: 32,
                 _reserved: 0,
@@ -92,6 +93,8 @@ impl Default for AudioComponentInstanceHostObject {
             input_stream_format: None,
             output_stream_format: None,
             render_callback: None,
+            render_notifications: Vec::new(),
+            has_logged_first_render: false,
             last_render_time: None,
             al_source: None,
             is_running_handler: false,

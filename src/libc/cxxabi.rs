@@ -9,7 +9,7 @@
 //! - [Itanium C++ ABI specification](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#dso-dtor-runtime-api)
 
 use crate::abi::GuestFunction;
-use crate::dyld::{export_c_func, FunctionExports};
+use crate::dyld::{export_c_func, export_c_func_aliased, FunctionExports};
 use crate::mem::MutVoidPtr;
 use crate::Environment;
 
@@ -34,7 +34,23 @@ fn __cxa_finalize(_env: &mut Environment, d: MutVoidPtr) {
     log!("TODO: __cxa_finalize({:?}) (unimplemented)", d);
 }
 
+fn __Unwind_SjLj_Register(_env: &mut Environment, function_context: MutVoidPtr) {
+    log_dbg!(
+        "TODO: __Unwind_SjLj_Register({:?}) (exception unwinding unimplemented)",
+        function_context
+    );
+}
+
+fn __Unwind_SjLj_Unregister(_env: &mut Environment, function_context: MutVoidPtr) {
+    log_dbg!(
+        "TODO: __Unwind_SjLj_Unregister({:?}) (exception unwinding unimplemented)",
+        function_context
+    );
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(__cxa_atexit(_, _, _)),
     export_c_func!(__cxa_finalize(_)),
+    export_c_func_aliased!("_Unwind_SjLj_Register", __Unwind_SjLj_Register(_)),
+    export_c_func_aliased!("_Unwind_SjLj_Unregister", __Unwind_SjLj_Unregister(_)),
 ];

@@ -533,13 +533,19 @@ pub fn is_supported_audio_format(format: &AudioStreamBasicDescription) -> bool {
     match format_id {
         kAudioFormatAppleIMA4 => (channels_per_frame == 1) || (channels_per_frame == 2),
         kAudioFormatLinearPCM => {
+            let valid_channel_count = channels_per_frame == 1 || channels_per_frame == 2;
+            if format_flags & kAudioFormatFlagIsFloat != 0 {
+                return valid_channel_count
+                    && bits_per_channel == 32
+                    && bytes_per_frame == channels_per_frame * 4
+                    && format_flags & kAudioFormatFlagIsBigEndian == 0;
+            }
             // TODO: support more PCM formats
-            (channels_per_frame == 1 || channels_per_frame == 2)
+            valid_channel_count
                 && (bits_per_channel == 8 || bits_per_channel == 16 || bits_per_channel == 32)
                 && ((format_flags & kAudioFormatFlagIsPacked) != 0
                     || ((bits_per_channel / 8) * channels_per_frame) == bytes_per_frame)
                 && (format_flags & kAudioFormatFlagIsBigEndian) == 0
-                && (format_flags & kAudioFormatFlagIsFloat) == 0
         }
         _ => false,
     }
@@ -594,6 +600,29 @@ pub fn decode_buffer(
             }
         }
         kAudioFormatLinearPCM => {
+            if format.format_flags & kAudioFormatFlagIsFloat != 0 {
+                let mut pcm = Vec::with_capacity(data_slice.len() / 2);
+                let bytes_per_frame = format.bytes_per_frame as usize;
+                for frame in data_slice.chunks_exact(bytes_per_frame) {
+                    for sample in frame.chunks_exact(4) {
+                        let sample = f32::from_le_bytes(sample.try_into().unwrap());
+                        let sample = if sample.is_finite() {
+                            sample.clamp(-1.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let sample = (sample * i16::MAX as f32) as i16;
+                        pcm.extend_from_slice(&sample.to_le_bytes());
+                    }
+                }
+                let al_format = if format.channels_per_frame == 1 {
+                    al::AL_FORMAT_MONO16
+                } else {
+                    al::AL_FORMAT_STEREO16
+                };
+                return (al_format, format.sample_rate as ALsizei, pcm);
+            }
+
             // The end of the data might be misaligned (this happens in Crash
             // Bandicoot Nitro Kart 3D somehow).
             let misaligned_by = data_slice.len() % (format.bytes_per_frame as usize);
@@ -945,6 +974,14 @@ pub fn AudioQueueStart(
     let host_object = state.audio_queues.get_mut(&in_aq).unwrap();
 
     host_object.is_running = AudioQueueIsRunning::Running;
+    log!(
+        "AudioQueueStart({:?}): supported format: {}, queued buffers: {}, OpenAL source: {:?}, volume: {}",
+        in_aq,
+        is_supported_audio_format(&host_object.format),
+        host_object.buffer_queue.len(),
+        host_object.al_source,
+        host_object.volume
+    );
 
     if is_supported_audio_format(&host_object.format) {
         let al_source = host_object.al_source.unwrap();
