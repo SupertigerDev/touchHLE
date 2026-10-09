@@ -121,7 +121,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let bounds: CGRect = msg![env; window bounds];
     () = msg![env; this setFrame:bounds];
-    let dim_color: id = msg_class![env; UIColor colorWithWhite:0.0 alpha:0.45];
+    let dim_color_value: f32 = 0.0;
+    let dim_alpha: f32 = 0.45;
+    let dim_color: id = msg_class![env; UIColor colorWithWhite:dim_color_value alpha:dim_alpha];
     () = msg![env; this setBackgroundColor:dim_color];
 
     let panel_width = (bounds.size.width - 40.0).min(320.0).max(200.0);
