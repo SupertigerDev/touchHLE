@@ -92,6 +92,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     scope.insert(key, Value::Boolean(value));
 }
 
+- (())encodeFloat:(f32)value
+           forKey:(id)key { // NSString *
+    let key = normalize_key(env, key);
+    let scope = get_value_to_encode_for_current_key(env, this);
+    assert!(!scope.contains_key(&key));
+    scope.insert(key, Value::Real(value.into()));
+}
+
 - (id)initForWritingWithMutableData:(id)data { // NSMutableData *
     if data == nil {
         release(env, this);
