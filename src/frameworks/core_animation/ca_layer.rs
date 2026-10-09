@@ -46,8 +46,15 @@ pub(super) struct CALayerHostObject {
     pub(super) affine_transform: CGAffineTransform,
     pub(super) hidden: bool,
     pub(super) opaque: bool,
+    pub(super) masks_to_bounds: bool,
     pub(super) opacity: f32,
     pub(super) background_color: Option<CGColorHostObject>,
+    pub(super) shadow_color: Option<CGColorHostObject>,
+    pub(super) shadow_offset: CGSize,
+    pub(super) shadow_opacity: f32,
+    pub(super) shadow_radius: CGFloat,
+    pub(super) should_rasterize: bool,
+    pub(super) rasterization_scale: CGFloat,
     pub(super) corner_radius: CGFloat,
     pub(super) needs_display: bool,
     pub(super) needs_display_on_bounds_change: bool,
@@ -124,8 +131,15 @@ pub const CLASSES: ClassExports = objc_classes! {
         affine_transform: CGAffineTransformIdentity,
         hidden: false,
         opaque: false,
+        masks_to_bounds: false,
         opacity: 1.0,
         background_color: None, // transparency
+        shadow_color: None,
+        shadow_offset: CGSize { width: 0.0, height: -3.0 },
+        shadow_opacity: 0.0,
+        shadow_radius: 3.0,
+        should_rasterize: false,
+        rasterization_scale: 1.0,
         corner_radius: 0.0,
         needs_display: false,
         needs_display_on_bounds_change: false,
@@ -350,6 +364,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow_mut::<CALayerHostObject>(this).opaque = opaque;
 }
 
+- (bool)masksToBounds {
+    env.objc.borrow::<CALayerHostObject>(this).masks_to_bounds
+}
+- (())setMasksToBounds:(bool)masks_to_bounds {
+    env.objc.borrow_mut::<CALayerHostObject>(this).masks_to_bounds = masks_to_bounds;
+}
+
 - (f32)opacity {
     env.objc.borrow::<CALayerHostObject>(this).opacity
 }
@@ -384,6 +405,59 @@ pub const CLASSES: ClassExports = objc_classes! {
     if is_implicit_animation_enabled(env, this) && old_color_ref != nil && new_color_ref != nil {
         add_default_implied_basic_animation(env, this, "backgroundColor", old_color_ref, new_color_ref);
     }
+}
+
+- (CGColorRef)shadowColor {
+    if let Some(shadow_color) = env.objc.borrow::<CALayerHostObject>(this).shadow_color {
+        let class = env.objc.get_known_class("_touchHLE_CGColor", &mut env.mem);
+        let obj = env.objc.alloc_object(class, Box::new(shadow_color), &mut env.mem);
+        autorelease(env, obj)
+    } else {
+        nil
+    }
+}
+- (())setShadowColor:(CGColorRef)new_color_ref {
+    let new_color = if new_color_ref == nil {
+        None
+    } else {
+        Some(*env.objc.borrow::<CGColorHostObject>(new_color_ref))
+    };
+    env.objc.borrow_mut::<CALayerHostObject>(this).shadow_color = new_color;
+}
+
+- (CGSize)shadowOffset {
+    env.objc.borrow::<CALayerHostObject>(this).shadow_offset
+}
+- (())setShadowOffset:(CGSize)shadow_offset {
+    env.objc.borrow_mut::<CALayerHostObject>(this).shadow_offset = shadow_offset;
+}
+
+- (f32)shadowOpacity {
+    env.objc.borrow::<CALayerHostObject>(this).shadow_opacity
+}
+- (())setShadowOpacity:(f32)shadow_opacity {
+    env.objc.borrow_mut::<CALayerHostObject>(this).shadow_opacity = shadow_opacity;
+}
+
+- (CGFloat)shadowRadius {
+    env.objc.borrow::<CALayerHostObject>(this).shadow_radius
+}
+- (())setShadowRadius:(CGFloat)shadow_radius {
+    env.objc.borrow_mut::<CALayerHostObject>(this).shadow_radius = shadow_radius;
+}
+
+- (bool)shouldRasterize {
+    env.objc.borrow::<CALayerHostObject>(this).should_rasterize
+}
+- (())setShouldRasterize:(bool)should_rasterize {
+    env.objc.borrow_mut::<CALayerHostObject>(this).should_rasterize = should_rasterize;
+}
+
+- (CGFloat)rasterizationScale {
+    env.objc.borrow::<CALayerHostObject>(this).rasterization_scale
+}
+- (())setRasterizationScale:(CGFloat)rasterization_scale {
+    env.objc.borrow_mut::<CALayerHostObject>(this).rasterization_scale = rasterization_scale;
 }
 
 - (CGFloat)cornerRadius {

@@ -46,6 +46,27 @@ fn get_standard_color(
     }
 }
 
+fn hsba_to_rgba(
+    hue: CGFloat,
+    saturation: CGFloat,
+    brightness: CGFloat,
+    alpha: CGFloat,
+) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+    let hue = hue.rem_euclid(1.0) * 6.0;
+    let chroma = brightness * saturation;
+    let x = chroma * (1.0 - (hue.rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match hue.floor() as u32 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    let offset = brightness - chroma;
+    (r + offset, g + offset, b + offset, alpha)
+}
+
 struct UIColorHostObject {
     cg_color: CGColorRef,
 }
@@ -83,6 +104,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     let new: id = msg![env; this alloc];
     let new: id = msg![env; new initWithWhite:w alpha:a];
     autorelease(env, new)
+}
+
++ (id)colorWithHue:(CGFloat)hue
+       saturation:(CGFloat)saturation
+       brightness:(CGFloat)brightness
+            alpha:(CGFloat)alpha {
+    let (r, g, b, a) = hsba_to_rgba(hue, saturation, brightness, alpha);
+    msg![env; this colorWithRed:r green:g blue:b alpha:a]
 }
 
 + (id)clearColor    { get_standard_color(env, _cmd, 0.0, 0.0, 0.0, 0.0) }
@@ -130,6 +159,14 @@ pub const CLASSES: ClassExports = objc_classes! {
             alpha:(CGFloat)a {
     env.objc.borrow_mut::<UIColorHostObject>(this).cg_color = cg_color::from_rgba(env, (r, g, b, a));
     this
+}
+
+- (id)initWithHue:(CGFloat)hue
+      saturation:(CGFloat)saturation
+      brightness:(CGFloat)brightness
+           alpha:(CGFloat)alpha {
+    let (r, g, b, a) = hsba_to_rgba(hue, saturation, brightness, alpha);
+    msg![env; this initWithRed:r green:g blue:b alpha:a]
 }
 
 // NSCoding implementation
@@ -192,6 +229,41 @@ pub const CLASSES: ClassExports = objc_classes! {
     true
 }
 
+- (bool)getHue:(MutPtr<CGFloat>)hue
+   saturation:(MutPtr<CGFloat>)saturation
+   brightness:(MutPtr<CGFloat>)brightness
+        alpha:(MutPtr<CGFloat>)alpha {
+    let color = env.objc.borrow::<UIColorHostObject>(this).cg_color;
+    let (r, g, b, a) = cg_color::to_rgba(&env.objc, color);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let hue_value = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / delta).rem_euclid(6.0) / 6.0
+    } else if max == g {
+        ((b - r) / delta + 2.0) / 6.0
+    } else {
+        ((r - g) / delta + 4.0) / 6.0
+    };
+    let saturation_value = if max == 0.0 { 0.0 } else { delta / max };
+
+    if !hue.is_null() {
+        env.mem.write(hue, hue_value);
+    }
+    if !saturation.is_null() {
+        env.mem.write(saturation, saturation_value);
+    }
+    if !brightness.is_null() {
+        env.mem.write(brightness, max);
+    }
+    if !alpha.is_null() {
+        env.mem.write(alpha, a);
+    }
+    true
+}
+
 - (())set {
     msg![env; this setFill]
     // TODO: set stroke color as well
@@ -202,6 +274,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     assert_ne!(context, nil);
     let (r, g, b, a) = get_rgba(&env.objc, this);
     CGContextSetRGBFillColor(env, context, r, g, b, a);
+}
+
+- (())setStroke {
+    log!("TODO: [(UIColor*){:?} setStroke]", this);
 }
 
 - (CGColorRef)CGColor {

@@ -9,6 +9,7 @@ use super::{UIControlState, UIControlStateNormal};
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect};
 use crate::frameworks::foundation::ns_string::{from_rust_string, get_static_str, to_rust_string};
 use crate::frameworks::foundation::NSInteger;
+use crate::frameworks::uikit::ui_image::UIEdgeInsets;
 use crate::frameworks::uikit::ui_font::UITextAlignmentCenter;
 use crate::objc::{
     autorelease, id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil, objc_classes,
@@ -49,10 +50,15 @@ pub struct UIButtonHostObject {
     image_view: id,
     /// `UIImageView*`
     background_image_view: id,
+    content_edge_insets: UIEdgeInsets,
+    title_edge_insets: UIEdgeInsets,
+    image_edge_insets: UIEdgeInsets,
     /// Values are `UIString*`
     titles_for_states: HashMap<UIControlState, id>,
     /// Values are `UIColor*`
     title_colors_for_states: HashMap<UIControlState, id>,
+    /// Values are `UIColor*`
+    title_shadow_colors_for_states: HashMap<UIControlState, id>,
     /// Values are `UIImage*`
     images_for_states: HashMap<UIControlState, id>,
     /// Values are `UIImage*`
@@ -67,8 +73,12 @@ impl Default for UIButtonHostObject {
             title_label: nil,
             image_view: nil,
             background_image_view: nil,
+            content_edge_insets: UIEdgeInsets::default(),
+            title_edge_insets: UIEdgeInsets::default(),
+            image_edge_insets: UIEdgeInsets::default(),
             titles_for_states: HashMap::new(),
             title_colors_for_states: HashMap::new(),
+            title_shadow_colors_for_states: HashMap::new(),
             images_for_states: HashMap::new(),
             background_images_for_states: HashMap::new(),
         }
@@ -81,6 +91,9 @@ fn update(env: &mut Environment, this: id) {
     () = msg![env; title_label setText:title];
     let title_color: id = msg![env; this currentTitleColor];
     () = msg![env; title_label setTextColor:title_color];
+    let state: UIControlState = msg![env; this state];
+    let title_shadow_color: id = msg![env; this titleShadowColorForState:state];
+    () = msg![env; title_label setShadowColor:title_shadow_color];
 
     let image_view: id = msg![env; this imageView];
     let image: id = msg![env; this currentImage];
@@ -112,6 +125,9 @@ fn init_common(env: &mut Environment, this: id) -> id {
     host_obj
         .title_colors_for_states
         .insert(UIControlStateNormal, text_color);
+    host_obj
+        .title_shadow_colors_for_states
+        .insert(UIControlStateNormal, nil);
     host_obj.images_for_states.insert(UIControlStateNormal, nil);
     host_obj
         .background_images_for_states
@@ -226,8 +242,12 @@ pub const CLASSES: ClassExports = objc_classes! {
         title_label,
         image_view,
         background_image_view,
+        content_edge_insets: _,
+        title_edge_insets: _,
+        image_edge_insets: _,
         titles_for_states,
         title_colors_for_states,
+        title_shadow_colors_for_states,
         images_for_states,
         background_images_for_states
     } = std::mem::take(env.objc.borrow_mut(this));
@@ -239,6 +259,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         release(env, title);
     }
     for (_state, color) in title_colors_for_states {
+        release(env, color);
+    }
+    for (_state, color) in title_shadow_colors_for_states {
         release(env, color);
     }
     for (_state, image) in images_for_states {
@@ -302,6 +325,24 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg![env; label setFont:font];
     update(env, this);
 }
+- (UIEdgeInsets)contentEdgeInsets {
+    env.objc.borrow::<UIButtonHostObject>(this).content_edge_insets
+}
+- (())setContentEdgeInsets:(UIEdgeInsets)content_edge_insets {
+    env.objc.borrow_mut::<UIButtonHostObject>(this).content_edge_insets = content_edge_insets;
+}
+- (UIEdgeInsets)titleEdgeInsets {
+    env.objc.borrow::<UIButtonHostObject>(this).title_edge_insets
+}
+- (())setTitleEdgeInsets:(UIEdgeInsets)title_edge_insets {
+    env.objc.borrow_mut::<UIButtonHostObject>(this).title_edge_insets = title_edge_insets;
+}
+- (UIEdgeInsets)imageEdgeInsets {
+    env.objc.borrow::<UIButtonHostObject>(this).image_edge_insets
+}
+- (())setImageEdgeInsets:(UIEdgeInsets)image_edge_insets {
+    env.objc.borrow_mut::<UIButtonHostObject>(this).image_edge_insets = image_edge_insets;
+}
 // TODO: observe focussing somehow
 
 - (id)currentTitle {
@@ -358,6 +399,25 @@ pub const CLASSES: ClassExports = objc_classes! {
     retain(env, color);
     let host_obj = env.objc.borrow_mut::<UIButtonHostObject>(this);
     if let Some(old) = host_obj.title_colors_for_states.insert(state, color) {
+        release(env, old);
+    }
+    update(env, this);
+}
+
+- (id)titleShadowColorForState:(UIControlState)state {
+    let host_obj = env.objc.borrow::<UIButtonHostObject>(this);
+    host_obj
+        .title_shadow_colors_for_states
+        .get(&state)
+        .or_else(|| host_obj.title_shadow_colors_for_states.get(&UIControlStateNormal))
+        .copied()
+        .unwrap()
+}
+- (())setTitleShadowColor:(id)color // UIColor*
+      forState:(UIControlState)state {
+    retain(env, color);
+    let host_obj = env.objc.borrow_mut::<UIButtonHostObject>(this);
+    if let Some(old) = host_obj.title_shadow_colors_for_states.insert(state, color) {
         release(env, old);
     }
     update(env, this);

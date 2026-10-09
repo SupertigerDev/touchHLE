@@ -80,6 +80,8 @@ pub(super) struct UIViewHostObject {
     layer: id,
     /// Subviews in back-to-front order. These are strong references.
     subviews: Vec<id>,
+    /// Gesture recognizers attached to this view. These are strong references.
+    pub(super) gesture_recognizers: Vec<id>,
     /// The superview. This is a weak reference.
     superview: id,
     /// The view controller that controls this view. This is a weak reference
@@ -99,6 +101,7 @@ impl Default for UIViewHostObject {
         UIViewHostObject {
             layer: nil,
             subviews: Vec::new(),
+            gesture_recognizers: Vec::new(),
             superview: nil,
             view_controller: nil,
             root_view_controller: nil,
@@ -486,6 +489,51 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, subs)
 }
 
+- (id)gestureRecognizers {
+    let gesture_recognizers = env
+        .objc
+        .borrow::<UIViewHostObject>(this)
+        .gesture_recognizers
+        .clone();
+    for recognizer in &gesture_recognizers {
+        retain(env, *recognizer);
+    }
+    let recognizers = ns_array::from_vec(env, gesture_recognizers);
+    autorelease(env, recognizers)
+}
+
+- (())addGestureRecognizer:(id)gesture_recognizer {
+    if gesture_recognizer == nil {
+        return;
+    }
+    let old_view: id = msg![env; gesture_recognizer view];
+    if old_view == this {
+        return;
+    }
+    if old_view != nil {
+        () = msg![env; old_view removeGestureRecognizer:gesture_recognizer];
+    }
+    retain(env, gesture_recognizer);
+    env.objc
+        .borrow_mut::<UIViewHostObject>(this)
+        .gesture_recognizers
+        .push(gesture_recognizer);
+    super::ui_gesture_recognizer::set_view(env, gesture_recognizer, this);
+}
+
+- (())removeGestureRecognizer:(id)gesture_recognizer {
+    let recognizers = &mut env
+        .objc
+        .borrow_mut::<UIViewHostObject>(this)
+        .gesture_recognizers;
+    let Some(index) = recognizers.iter().position(|&r| r == gesture_recognizer) else {
+        return;
+    };
+    recognizers.remove(index);
+    super::ui_gesture_recognizer::set_view(env, gesture_recognizer, nil);
+    release(env, gesture_recognizer);
+}
+
 - (())addSubview:(id)view {
     log_dbg!("[(UIView*){:?} addSubview:{:?}] => ()", this, view);
 
@@ -628,6 +676,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         layer,
         superview,
         subviews,
+        gesture_recognizers,
         view_controller,
         root_view_controller,
         tag: _,
@@ -643,6 +692,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     for subview in subviews {
         env.objc.borrow_mut::<UIViewHostObject>(subview).superview = nil;
         release(env, subview);
+    }
+    for gesture_recognizer in gesture_recognizers {
+        super::ui_gesture_recognizer::set_view(env, gesture_recognizer, nil);
+        release(env, gesture_recognizer);
     }
 
     let state = &mut env.framework_state.uikit.ui_view.views;

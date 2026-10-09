@@ -333,6 +333,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     for i in 0..count {
         let segment: id = msg![env; segments_array objectAtIndex:i];
         let frame: CGRect = msg![env; segment frame];
+        retain(env, segment);
         segments.push(segment);
         widths.push(Some(frame.size.width.max(1.0)));
     }
@@ -357,11 +358,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     let UISegmentedControlHostObject {
         superclass: _,
         selected_segment_index: _,
-        segments: _,
+        segments,
         segment_widths: _,
         tint_color,
         momentary: _,
     } = std::mem::take(env.objc.borrow_mut(this));
+    for segment in segments {
+        release(env, segment);
+    }
     release(env, tint_color);
     msg_super![env; this dealloc]
 }

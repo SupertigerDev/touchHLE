@@ -362,6 +362,54 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 @end
 
+@implementation UIRuntimeOutletCollectionConnection: UIRuntimeConnection
+
+- (())connect {
+    let &UIRuntimeConnectionHostObject {
+        destination,
+        label,
+        source
+    } = env.objc.borrow(this);
+
+    let label_string = to_rust_string(env, label);
+    let array_class = env.objc.get_known_class("NSArray", &mut env.mem);
+    let destinations: Vec<crate::objc::id> =
+        if msg![env; destination isKindOfClass:array_class] {
+            let count: NSUInteger = msg![env; destination count];
+            (0..count)
+                .map(|index| msg![env; destination objectAtIndex:index])
+                .collect()
+        } else {
+            vec![destination]
+        };
+
+    let mut characters = label_string.chars();
+    if let Some(first) = characters.next() {
+        let capitalized_key = format!("{}{}", first.to_uppercase(), characters.as_str());
+        let singular_key = capitalized_key.strip_suffix('s').unwrap_or(&capitalized_key);
+        let source_class: Class = msg![env; source class];
+        for selector_name in [
+            format!("add{capitalized_key}Object:"),
+            format!("add{singular_key}:"),
+        ] {
+            if let Some(selector) = env.objc.lookup_selector(&selector_name) {
+                if env.objc.class_has_method(source_class, selector) {
+                    for destination in destinations {
+                        () = crate::objc::msg_send(env, (source, selector, destination));
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    for destination in destinations {
+        () = msg![env; source setValue:destination forKey:label];
+    }
+}
+
+@end
+
 };
 
 /// Takes a [GuestPathBuf] where a nib file is located and deserializes it.

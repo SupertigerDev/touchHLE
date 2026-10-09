@@ -15,11 +15,13 @@ use std::time::Instant;
 pub mod ui_accelerometer;
 pub mod ui_activity_indicator_view;
 pub mod ui_application;
+pub mod ui_bezier_path;
 pub mod ui_color;
 pub mod ui_device;
 pub mod ui_event;
 pub mod ui_font;
 pub mod ui_geometry;
+pub mod ui_gesture_recognizer;
 pub mod ui_graphics;
 pub mod ui_image;
 pub mod ui_image_picker_controller;
@@ -39,10 +41,12 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         ui_accelerometer::CLASSES,
         ui_activity_indicator_view::CLASSES,
         ui_application::CLASSES,
+        ui_bezier_path::CLASSES,
         ui_color::CLASSES,
         ui_device::CLASSES,
         ui_event::CLASSES,
         ui_font::CLASSES,
+        ui_gesture_recognizer::CLASSES,
         ui_image::CLASSES,
         ui_image_picker_controller::CLASSES,
         ui_local_notification::CLASSES,
@@ -75,6 +79,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     constant_exports: &[
         ui_application::CONSTANTS,
         ui_device::CONSTANTS,
+        ui_image::CONSTANTS,
         ui_view::ui_control::ui_text_field::CONSTANTS,
         ui_view::ui_window::CONSTANTS,
     ],

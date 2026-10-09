@@ -16,6 +16,7 @@ use crate::frameworks::foundation::{ns_data, ns_string, NSInteger};
 use crate::frameworks::uikit::ui_graphics::UIGraphicsGetCurrentContext;
 use crate::fs::GuestPath;
 use crate::image::Image;
+use crate::dyld::{ConstantExports, HostConstant};
 use crate::objc::{
     autorelease, id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject,
     NSZonePtr,
@@ -25,14 +26,16 @@ use std::collections::HashMap;
 
 const CACHE_SIZE: usize = 60;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C, packed)]
-struct UIEdgeInsets {
+pub(super) struct UIEdgeInsets {
     top: CGFloat,
     left: CGFloat,
     bottom: CGFloat,
     right: CGFloat,
 }
+unsafe impl crate::mem::SafeRead for UIEdgeInsets {}
+crate::abi::impl_GuestRet_for_large_struct!(UIEdgeInsets);
 impl GuestArg for UIEdgeInsets {
     const REG_COUNT: usize = 4;
 
@@ -52,6 +55,16 @@ impl GuestArg for UIEdgeInsets {
         self.right.to_regs(&mut regs[3..4]);
     }
 }
+
+pub const CONSTANTS: ConstantExports = &[(
+    "_UIEdgeInsetsZero",
+    HostConstant::Custom(|env| {
+        env.mem
+            .alloc_and_write(UIEdgeInsets::default())
+            .cast_void()
+            .cast_const()
+    }),
+)];
 
 #[derive(Default)]
 pub struct State {
