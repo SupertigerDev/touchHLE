@@ -307,7 +307,9 @@ pub fn printf_inner<const NS_LOG: bool, F: Fn(&Mem, GuestUSize) -> u8>(
                         }
                         let padding = pad_width.saturating_sub(int_with_precision.len());
                         res.resize(res.len() + padding, b'0');
-                        res.extend_from_slice(int_with_precision.as_bytes().get(sign_len..).unwrap());
+                        res.extend_from_slice(
+                            int_with_precision.as_bytes().get(sign_len..).unwrap(),
+                        );
                     } else {
                         let padding = pad_width.saturating_sub(int_with_precision.len());
                         res.resize(res.len() + padding, b' ');
