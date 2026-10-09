@@ -188,7 +188,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setSelectedIndex:(NSUInteger)index {
     let count = env.objc.borrow::<UITabBarControllerHostObject>(this).view_controllers.len();
-    assert!(if count == 0 { index == 0 } else { index < count as NSUInteger });
+    if !(if count == 0 { index == 0 } else { index < count as NSUInteger }) {
+        return;
+    }
     if env.objc.borrow::<UITabBarControllerHostObject>(this).selected_index == index {
         return;
     }

@@ -110,6 +110,9 @@ pub const CLASSES: ClassExports = objc_classes! {
     this
 }
 
+- (())finishDecoding {
+}
+
 - (())dealloc {
     let host_obj = borrow_host_obj(env, this);
     let already_unarchived = std::mem::take(&mut host_obj.already_unarchived);
