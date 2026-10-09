@@ -6,6 +6,7 @@
 //! `UIImage`.
 
 use crate::abi::GuestArg;
+use crate::dyld::{ConstantExports, HostConstant};
 use crate::frameworks::core_graphics::cg_context::CGContextDrawImage;
 use crate::frameworks::core_graphics::cg_image::{
     self, CGImageGetHeight, CGImageGetWidth, CGImageRef, CGImageRelease, CGImageRetain,
@@ -16,7 +17,6 @@ use crate::frameworks::foundation::{ns_data, ns_string, NSInteger};
 use crate::frameworks::uikit::ui_graphics::UIGraphicsGetCurrentContext;
 use crate::fs::GuestPath;
 use crate::image::Image;
-use crate::dyld::{ConstantExports, HostConstant};
 use crate::objc::{
     autorelease, id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject,
     NSZonePtr,
@@ -106,8 +106,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)imageNamed:(id)name { // NSString*
     // TODO: figure out whether this is actually correct in all cases
     let bundle: id = msg_class![env; NSBundle mainBundle];
-    let path: id = msg![env; bundle pathForResource:name ofType:nil];
     let name_str = ns_string::to_rust_string(env, name).to_string();
+    let mut path: id = msg![env; bundle pathForResource:name ofType:nil];
+    if path == nil {
+        for extension in ["png", "jpg", "jpeg"] {
+            let extension = ns_string::get_static_str(env, extension);
+            path = msg![env; bundle pathForResource:name ofType:extension];
+            if path != nil {
+                break;
+            }
+        }
+    }
     if path == nil {
         log!("Warning: [UIImage imageNamed:{:?}] => nil", name_str);
         return nil;

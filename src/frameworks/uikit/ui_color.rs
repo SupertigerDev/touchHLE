@@ -7,7 +7,9 @@
 
 use super::ui_graphics::UIGraphicsGetCurrentContext;
 use crate::frameworks::core_graphics::cg_color::{CGColorRef, CGColorRelease, CGColorRetain};
-use crate::frameworks::core_graphics::cg_context::CGContextSetRGBFillColor;
+use crate::frameworks::core_graphics::cg_context::{
+    CGContextSetRGBFillColor, CGContextSetRGBStrokeColor,
+};
 use crate::frameworks::core_graphics::{cg_color, CGFloat};
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::frameworks::foundation::NSInteger;
@@ -265,8 +267,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())set {
-    msg![env; this setFill]
-    // TODO: set stroke color as well
+    let _: () = msg![env; this setFill];
+    msg![env; this setStroke]
 }
 
 - (())setFill {
@@ -277,7 +279,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setStroke {
-    log!("TODO: [(UIColor*){:?} setStroke]", this);
+    let context = UIGraphicsGetCurrentContext(env);
+    assert_ne!(context, nil);
+    let (r, g, b, a) = get_rgba(&env.objc, this);
+    CGContextSetRGBStrokeColor(env, context, r, g, b, a);
 }
 
 - (CGColorRef)CGColor {

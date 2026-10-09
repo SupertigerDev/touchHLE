@@ -52,8 +52,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())dealloc {
     let host_obj = env.objc.borrow::<CGContextHostObject>(this);
     let CGContextSubclass::CGBitmapContext(bitmap_data) = host_obj.subclass;
+    let original_data = host_obj
+        .transparency_layers
+        .iter()
+        .find_map(|layer| layer.as_ref().map(|layer| layer.original_data))
+        .unwrap_or(bitmap_data.data);
     if bitmap_data.data_is_owned {
-        env.mem.free(bitmap_data.data);
+        env.mem.free(original_data);
+    }
+    for layer in host_obj.transparency_layers.iter().flatten() {
+        env.mem.free(layer.layer_data);
     }
     CGFontRelease(env, host_obj.font);
 
@@ -67,6 +75,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 // TODO: keep more states saved once they are implemented
 type ContextState = (
     (CGFloat, CGFloat, CGFloat, CGFloat), // RGB fill color
+    (CGFloat, CGFloat, CGFloat, CGFloat), // RGB stroke color
     CGAffineTransform,                    // transform
     CGFontRef,                            // font
     CGFloat,                              // font size
@@ -76,6 +85,7 @@ type ContextState = (
 pub(super) struct CGContextHostObject {
     pub(super) subclass: CGContextSubclass,
     pub(super) rgb_fill_color: (CGFloat, CGFloat, CGFloat, CGFloat),
+    pub(super) rgb_stroke_color: (CGFloat, CGFloat, CGFloat, CGFloat),
     pub(super) font: CGFontRef,
     pub(super) font_size: CGFloat,
     /// Current transform.
@@ -84,8 +94,14 @@ pub(super) struct CGContextHostObject {
     /// Text transform.
     pub(super) text_transform: Option<CGAffineTransform>,
     pub(super) state_stack: Vec<ContextState>,
+    pub(super) transparency_layers: Vec<Option<TransparencyLayerState>>,
 }
 impl HostObject for CGContextHostObject {}
+
+pub(super) struct TransparencyLayerState {
+    pub(super) original_data: crate::mem::MutVoidPtr,
+    pub(super) layer_data: crate::mem::MutVoidPtr,
+}
 
 pub(super) enum CGContextSubclass {
     CGBitmapContext(cg_bitmap_context::CGBitmapContextData),
@@ -154,33 +170,169 @@ fn CGContextSetGrayFillColor(
 }
 
 fn CGContextSetGrayStrokeColor(
-    _env: &mut Environment,
+    env: &mut Environment,
     context: CGContextRef,
     gray: CGFloat,
     alpha: CGFloat,
 ) {
-    log!(
-        "TODO: CGContextSetGrayStrokeColor({:?}, {}, {})",
-        context,
-        gray,
-        alpha,
-    );
+    CGContextSetRGBStrokeColor(env, context, gray, gray, gray, alpha);
 }
-fn CGContextSetRGBStrokeColor(
-    _env: &mut Environment,
+pub fn CGContextSetRGBStrokeColor(
+    env: &mut Environment,
     context: CGContextRef,
-    r: CGFloat,
-    g: CGFloat,
-    b: CGFloat,
-    a: CGFloat,
+    red: CGFloat,
+    green: CGFloat,
+    blue: CGFloat,
+    alpha: CGFloat,
 ) {
-    log!(
-        "TODO: CGContextSetRGBStrokeColor({:?}, {}, {}, {}, {})",
+    let color = (red, green, blue, alpha);
+    env.objc
+        .borrow_mut::<CGContextHostObject>(context)
+        .rgb_stroke_color = color;
+}
+
+fn rounded_rect_interval(rect: CGRect, radius: CGFloat, y: CGFloat) -> (CGFloat, CGFloat) {
+    let radius = radius
+        .max(0.0)
+        .min(rect.size.width / 2.0)
+        .min(rect.size.height / 2.0);
+    let center_y = if y < rect.origin.y + radius {
+        rect.origin.y + radius
+    } else if y > rect.origin.y + rect.size.height - radius {
+        rect.origin.y + rect.size.height - radius
+    } else {
+        return (rect.origin.x, rect.origin.x + rect.size.width);
+    };
+    let dy = y - center_y;
+    let inset = radius - (radius * radius - dy * dy).max(0.0).sqrt();
+    (
+        rect.origin.x + inset,
+        rect.origin.x + rect.size.width - inset,
+    )
+}
+
+pub fn CGContextFillRoundedRect(
+    env: &mut Environment,
+    context: CGContextRef,
+    rect: CGRect,
+    radius: CGFloat,
+) {
+    if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
+        return;
+    }
+    let mut y = rect.origin.y;
+    let bottom = rect.origin.y + rect.size.height;
+    while y < bottom {
+        let (left, right) = rounded_rect_interval(rect, radius, y + 0.5);
+        if right > left {
+            cg_bitmap_context::fill_rect(
+                env,
+                context,
+                CGRect {
+                    origin: CGPoint { x: left, y },
+                    size: CGSize {
+                        width: right - left,
+                        height: (bottom - y).min(1.0),
+                    },
+                },
+                false,
+            );
+        }
+        y += 1.0;
+    }
+}
+
+pub fn CGContextStrokeRoundedRect(
+    env: &mut Environment,
+    context: CGContextRef,
+    rect: CGRect,
+    radius: CGFloat,
+    line_width: CGFloat,
+) {
+    if rect.size.width <= 0.0 || rect.size.height <= 0.0 || line_width <= 0.0 {
+        return;
+    }
+    let line_width = line_width
+        .min(rect.size.width / 2.0)
+        .min(rect.size.height / 2.0);
+    let old_fill_color = env
+        .objc
+        .borrow::<CGContextHostObject>(context)
+        .rgb_fill_color;
+    let stroke_color = env
+        .objc
+        .borrow::<CGContextHostObject>(context)
+        .rgb_stroke_color;
+    CGContextSetRGBFillColor(
+        env,
         context,
-        r,
-        g,
-        b,
-        a
+        stroke_color.0,
+        stroke_color.1,
+        stroke_color.2,
+        stroke_color.3,
+    );
+
+    let inner_rect = CGRect {
+        origin: CGPoint {
+            x: rect.origin.x + line_width,
+            y: rect.origin.y + line_width,
+        },
+        size: CGSize {
+            width: rect.size.width - 2.0 * line_width,
+            height: rect.size.height - 2.0 * line_width,
+        },
+    };
+    let inner_radius = (radius - line_width).max(0.0);
+    let mut y = rect.origin.y;
+    let bottom = rect.origin.y + rect.size.height;
+    while y < bottom {
+        let sample_y = y + 0.5;
+        let (outer_left, outer_right) = rounded_rect_interval(rect, radius, sample_y);
+        if sample_y < inner_rect.origin.y || sample_y > inner_rect.origin.y + inner_rect.size.height
+        {
+            if outer_right > outer_left {
+                cg_bitmap_context::fill_rect(
+                    env,
+                    context,
+                    CGRect {
+                        origin: CGPoint { x: outer_left, y },
+                        size: CGSize {
+                            width: outer_right - outer_left,
+                            height: (bottom - y).min(1.0),
+                        },
+                    },
+                    false,
+                );
+            }
+        } else {
+            let (inner_left, inner_right) =
+                rounded_rect_interval(inner_rect, inner_radius, sample_y);
+            for (left, right) in [(outer_left, inner_left), (inner_right, outer_right)] {
+                if right > left {
+                    cg_bitmap_context::fill_rect(
+                        env,
+                        context,
+                        CGRect {
+                            origin: CGPoint { x: left, y },
+                            size: CGSize {
+                                width: right - left,
+                                height: (bottom - y).min(1.0),
+                            },
+                        },
+                        false,
+                    );
+                }
+            }
+        }
+        y += 1.0;
+    }
+    CGContextSetRGBFillColor(
+        env,
+        context,
+        old_fill_color.0,
+        old_fill_color.1,
+        old_fill_color.2,
+        old_fill_color.3,
     );
 }
 
@@ -272,6 +424,7 @@ fn CGContextSaveGState(env: &mut Environment, context: CGContextRef) {
     let host_obj = env.objc.borrow_mut::<CGContextHostObject>(context);
     host_obj.state_stack.push((
         host_obj.rgb_fill_color,
+        host_obj.rgb_stroke_color,
         host_obj.transform,
         host_obj.font,
         host_obj.font_size,
@@ -290,10 +443,35 @@ fn CGContextRestoreGState(env: &mut Environment, context: CGContextRef) {
     let host_obj = env.objc.borrow_mut::<CGContextHostObject>(context);
     let state = host_obj.state_stack.pop().unwrap();
     host_obj.rgb_fill_color = state.0;
-    host_obj.transform = state.1;
-    host_obj.font = state.2;
-    host_obj.font_size = state.3;
-    host_obj.blend_mode = state.4;
+    host_obj.rgb_stroke_color = state.1;
+    host_obj.transform = state.2;
+    host_obj.font = state.3;
+    host_obj.font_size = state.4;
+    host_obj.blend_mode = state.5;
+}
+
+fn CGContextBeginTransparencyLayer(
+    env: &mut Environment,
+    context: CGContextRef,
+    _auxiliary_info: CFTypeRef,
+) {
+    let layer = cg_bitmap_context::begin_transparency_layer(env, context);
+    env.objc
+        .borrow_mut::<CGContextHostObject>(context)
+        .transparency_layers
+        .push(layer);
+}
+
+fn CGContextEndTransparencyLayer(env: &mut Environment, context: CGContextRef) {
+    let layer = env
+        .objc
+        .borrow_mut::<CGContextHostObject>(context)
+        .transparency_layers
+        .pop()
+        .expect("CGContextEndTransparencyLayer called without a matching begin");
+    if let Some(layer) = layer {
+        cg_bitmap_context::end_transparency_layer(env, context, layer);
+    }
 }
 
 fn CGContextSetInterpolationQuality(
@@ -450,6 +628,8 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGContextDrawImage(_, _, _)),
     export_c_func!(CGContextSaveGState(_)),
     export_c_func!(CGContextRestoreGState(_)),
+    export_c_func!(CGContextBeginTransparencyLayer(_, _)),
+    export_c_func!(CGContextEndTransparencyLayer(_)),
     export_c_func!(CGContextSetInterpolationQuality(_, _)),
     export_c_func!(CGContextSetAllowsAntialiasing(_, _)),
     export_c_func!(CGContextSetShouldSmoothFonts(_, _)),

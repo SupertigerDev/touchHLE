@@ -13,13 +13,13 @@ use crate::frameworks::core_graphics::cg_color_space::{
     CGColorSpaceCreateDeviceRGB, CGColorSpaceRelease,
 };
 use crate::frameworks::core_graphics::cg_context::CGContextScaleCTM;
-use crate::frameworks::core_graphics::cg_image::{
-    CGImageRelease, kCGImageAlphaNoneSkipLast, kCGImageAlphaPremultipliedLast,
-};
-use crate::frameworks::core_graphics::{CGFloat, CGSize};
 use crate::frameworks::core_graphics::cg_context::{
     CGContextRef, CGContextRelease, CGContextRetain,
 };
+use crate::frameworks::core_graphics::cg_image::{
+    kCGImageAlphaNoneSkipLast, kCGImageAlphaPremultipliedLast, CGImageRelease,
+};
+use crate::frameworks::core_graphics::{CGFloat, CGSize};
 use crate::mem::{GuestUSize, MutVoidPtr};
 use crate::objc::{msg_class, nil};
 use crate::Environment;

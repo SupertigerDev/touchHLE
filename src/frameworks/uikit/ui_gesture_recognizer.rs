@@ -6,11 +6,9 @@
 //! UIKit gesture recognizers.
 
 use crate::frameworks::core_graphics::CGPoint;
-use crate::frameworks::foundation::{NSInteger, NSUInteger};
 use crate::frameworks::foundation::ns_string::get_static_str;
-use crate::objc::{
-    id, msg, msg_send, nil, objc_classes, ClassExports, HostObject, NSZonePtr, SEL,
-};
+use crate::frameworks::foundation::{NSInteger, NSUInteger};
+use crate::objc::{id, msg, msg_send, nil, objc_classes, ClassExports, HostObject, NSZonePtr, SEL};
 use crate::Environment;
 
 const UIGESTURE_RECOGNIZER_STATE_POSSIBLE: NSInteger = 0;
@@ -313,9 +311,7 @@ pub(super) fn handle_touches_ended(env: &mut Environment, view: id, touches: id)
     }
     for recognizer in recognizers {
         let (enabled, required_touches, action, is_swipe, required_taps, target, start_location) = {
-            let snapshot = env
-                .objc
-                .borrow::<GestureRecognizerHostObject>(recognizer);
+            let snapshot = env.objc.borrow::<GestureRecognizerHostObject>(recognizer);
             (
                 snapshot.enabled,
                 snapshot.number_of_touches_required,

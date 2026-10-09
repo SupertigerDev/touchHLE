@@ -8,7 +8,7 @@
 use super::cg_color::CGColorHostObject;
 use super::cg_color_space::{CGColorSpaceHostObject, CGColorSpaceRef};
 use super::cg_context::CGContextRef;
-use super::{CGPoint, CGFloat};
+use super::{CGFloat, CGPoint};
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::frameworks::core_foundation::{CFRelease, CFTypeRef};
 use crate::mem::MutPtr;
@@ -67,8 +67,11 @@ fn CGGradientCreateWithColors(
     let class = env
         .objc
         .get_known_class("_touchHLE_CGGradient", &mut env.mem);
-    env.objc
-        .alloc_object(class, Box::new(CGGradientHostObject { stops }), &mut env.mem)
+    env.objc.alloc_object(
+        class,
+        Box::new(CGGradientHostObject { stops }),
+        &mut env.mem,
+    )
 }
 
 fn CGGradientRelease(env: &mut Environment, gradient: CGGradientRef) {

@@ -30,6 +30,9 @@ pub struct UILabelHostObject {
     font: id,
     /// `UIColor*`
     text_color: id,
+    /// `UIColor*`
+    shadow_color: id,
+    shadow_offset: CGSize,
     text_alignment: UITextAlignment,
     line_break_mode: UILineBreakMode,
     number_of_lines: NSInteger,
@@ -42,6 +45,11 @@ impl Default for UILabelHostObject {
             text: nil,
             font: nil,
             text_color: nil,
+            shadow_color: nil,
+            shadow_offset: CGSize {
+                width: 0.0,
+                height: 0.0,
+            },
             text_alignment: UITextAlignmentLeft,
             line_break_mode: UILineBreakModeTailTruncation,
             number_of_lines: 1,
@@ -108,13 +116,16 @@ pub const CLASSES: ClassExports = objc_classes! {
         text,
         font,
         text_color,
+        shadow_color,
         text_alignment: _,
         line_break_mode: _,
         number_of_lines: _,
+        shadow_offset: _,
     } = env.objc.borrow(this);
     release(env, text);
     release(env, font);
     release(env, text_color);
+    release(env, shadow_color);
     msg_super![env; this dealloc]
 }
 
@@ -201,11 +212,24 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg_super![env; this setBackgroundColor:color]
 }
 
+- (id)shadowColor {
+    env.objc.borrow::<UILabelHostObject>(this).shadow_color
+}
 - (())setShadowColor:(id)color { // UIColor*
-    todo_objc_setter!(this, color);
+    let old_color = std::mem::replace(
+        &mut env.objc.borrow_mut::<UILabelHostObject>(this).shadow_color,
+        color,
+    );
+    retain(env, color);
+    release(env, old_color);
+    () = msg![env; this setNeedsDisplay];
+}
+- (CGSize)shadowOffset {
+    env.objc.borrow::<UILabelHostObject>(this).shadow_offset
 }
 - (())setShadowOffset:(CGSize)value {
-    todo_objc_setter!(this, value);
+    env.objc.borrow_mut::<UILabelHostObject>(this).shadow_offset = value;
+    () = msg![env; this setNeedsDisplay];
 }
 
 - (())setOpaque:(bool)_opaque {
@@ -252,6 +276,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         text,
         font,
         text_color,
+        shadow_color: _,
+        shadow_offset: _,
         text_alignment,
         line_break_mode,
         number_of_lines,

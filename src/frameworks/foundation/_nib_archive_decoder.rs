@@ -181,10 +181,24 @@ pub const CLASSES: ClassExports = objc_classes! {
     let ValueVariant::Data(data) = val.value() else {
         unreachable!()
     };
-    assert!(data[0] == 6 || data[0] == 7);
-    assert!(data.len() >= 9);
-    let x = f32::from_le_bytes(data[1..5].try_into().unwrap());
-    let y = f32::from_le_bytes(data[5..9].try_into().unwrap());
+    assert!(!data.is_empty());
+    let (x, y) = match data[0] {
+        6 => {
+            assert!(data.len() >= 9);
+            (
+                f32::from_le_bytes(data[1..5].try_into().unwrap()),
+                f32::from_le_bytes(data[5..9].try_into().unwrap()),
+            )
+        }
+        7 => {
+            assert!(data.len() >= 17);
+            (
+                f64::from_le_bytes(data[1..9].try_into().unwrap()) as f32,
+                f64::from_le_bytes(data[9..17].try_into().unwrap()) as f32,
+            )
+        }
+        tag => panic!("unexpected CGPoint data tag {tag}"),
+    };
     log_dbg!("decoded CGPoint {} {}", x, y);
     CGPoint { x, y }
 }
@@ -193,12 +207,28 @@ pub const CLASSES: ClassExports = objc_classes! {
     let ValueVariant::Data(data) = val.value() else {
         unreachable!()
     };
-    assert!(data[0] == 6 || data[0] == 7);
-    assert!(data.len() >= 17);
-    let x = f32::from_le_bytes(data[1..5].try_into().unwrap());
-    let y = f32::from_le_bytes(data[5..9].try_into().unwrap());
-    let width = f32::from_le_bytes(data[9..13].try_into().unwrap());
-    let height = f32::from_le_bytes(data[13..17].try_into().unwrap());
+    assert!(!data.is_empty());
+    let (x, y, width, height) = match data[0] {
+        6 => {
+            assert!(data.len() >= 17);
+            (
+                f32::from_le_bytes(data[1..5].try_into().unwrap()),
+                f32::from_le_bytes(data[5..9].try_into().unwrap()),
+                f32::from_le_bytes(data[9..13].try_into().unwrap()),
+                f32::from_le_bytes(data[13..17].try_into().unwrap()),
+            )
+        }
+        7 => {
+            assert!(data.len() >= 33);
+            (
+                f64::from_le_bytes(data[1..9].try_into().unwrap()) as f32,
+                f64::from_le_bytes(data[9..17].try_into().unwrap()) as f32,
+                f64::from_le_bytes(data[17..25].try_into().unwrap()) as f32,
+                f64::from_le_bytes(data[25..33].try_into().unwrap()) as f32,
+            )
+        }
+        tag => panic!("unexpected CGRect data tag {tag}"),
+    };
     log_dbg!("decoded CGRect {} {} {} {}", x, y, width, height);
     CGRect {
         origin: CGPoint { x, y },

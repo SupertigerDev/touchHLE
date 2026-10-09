@@ -5,10 +5,11 @@
  */
 //! `UINavigationController`.
 
+use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::frameworks::foundation::{ns_array, NSUInteger};
 use crate::objc::{
-    autorelease, id, impl_HostObject_with_superclass, msg, nil, objc_classes, release, retain,
-    ClassExports, NSZonePtr, SEL,
+    autorelease, id, impl_HostObject_with_superclass, msg, msg_super, nil, objc_classes, release,
+    retain, ClassExports, NSZonePtr, SEL,
 };
 
 // TODO: navigation bar and toolbar
@@ -34,6 +35,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::<UINavigationControllerHostObject>::default();
     env.objc.alloc_object(this, host_object, &mut env.mem)
+}
+
+- (id)initWithCoder:(id)coder {
+    let this: id = msg_super![env; this initWithCoder:coder];
+    let key = get_static_str(env, "UIViewControllers");
+    let view_controllers: id = msg![env; coder decodeObjectForKey:key];
+    () = msg![env; this setViewControllers:view_controllers];
+    this
 }
 
 - (id)initWithRootViewController:(id)root_vc { // UIViewController *

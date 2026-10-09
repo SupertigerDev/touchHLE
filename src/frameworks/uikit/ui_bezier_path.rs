@@ -6,15 +6,28 @@
 //! `UIBezierPath`.
 
 use crate::frameworks::core_graphics::cg_affine_transform::CGAffineTransform;
-use crate::frameworks::core_graphics::{CGRect, CGFloat};
+use crate::frameworks::core_graphics::cg_context::{
+    CGContextFillRoundedRect, CGContextStrokeRoundedRect,
+};
+use crate::frameworks::core_graphics::{CGFloat, CGRect};
+use crate::frameworks::uikit::ui_graphics::UIGraphicsGetCurrentContext;
 use crate::objc::{id, msg, objc_classes, ClassExports, HostObject, NSZonePtr};
-use crate::Environment;
 
-#[derive(Default)]
 struct UIBezierPathHostObject {
     bounds: CGRect,
     corner_radius: CGFloat,
+    line_width: CGFloat,
     uses_even_odd_fill_rule: bool,
+}
+impl Default for UIBezierPathHostObject {
+    fn default() -> Self {
+        Self {
+            bounds: CGRect::default(),
+            corner_radius: 0.0,
+            line_width: 1.0,
+            uses_even_odd_fill_rule: false,
+        }
+    }
 }
 impl HostObject for UIBezierPathHostObject {}
 
@@ -79,7 +92,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (CGFloat)lineWidth {
-    1.0
+    env.objc
+        .borrow::<UIBezierPathHostObject>(this)
+        .line_width
+}
+
+- (())setLineWidth:(CGFloat)value {
+    env.objc
+        .borrow_mut::<UIBezierPathHostObject>(this)
+        .line_width = value;
 }
 
 - (bool)usesEvenOddFillRule {
@@ -95,11 +116,19 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())fill {
-    log!("TODO: [(UIBezierPath*){:?} fill] rounded path rendering", this);
+    let context = UIGraphicsGetCurrentContext(env);
+    assert_ne!(context, crate::objc::nil);
+    let path = env.objc.borrow::<UIBezierPathHostObject>(this);
+    let (bounds, radius) = (path.bounds, path.corner_radius);
+    CGContextFillRoundedRect(env, context, bounds, radius);
 }
 
 - (())stroke {
-    log!("TODO: [(UIBezierPath*){:?} stroke] rounded path rendering", this);
+    let context = UIGraphicsGetCurrentContext(env);
+    assert_ne!(context, crate::objc::nil);
+    let path = env.objc.borrow::<UIBezierPathHostObject>(this);
+    let (bounds, radius, line_width) = (path.bounds, path.corner_radius, path.line_width);
+    CGContextStrokeRoundedRect(env, context, bounds, radius, line_width);
 }
 
 - (())addClip {

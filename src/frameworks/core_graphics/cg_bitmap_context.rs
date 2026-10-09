@@ -12,7 +12,7 @@ use super::cg_color_space::{
 use super::cg_context::{
     kCGBlendModeCopy, kCGBlendModeDarken, kCGBlendModeLighten, kCGBlendModeMultiply,
     kCGBlendModeNormal, kCGBlendModeScreen, CGBlendMode, CGContextHostObject, CGContextRef,
-    CGContextSubclass,
+    CGContextSubclass, TransparencyLayerState,
 };
 use super::cg_image::{
     self, kCGBitmapAlphaInfoMask, kCGBitmapByteOrderMask, kCGImageAlphaFirst, kCGImageAlphaLast,
@@ -86,12 +86,14 @@ pub fn CGBitmapContextCreate(
         }),
         // TODO: is this the correct default?
         rgb_fill_color: (0.0, 0.0, 0.0, 0.0),
+        rgb_stroke_color: (0.0, 0.0, 0.0, 1.0),
         font: Ptr::null(),
         font_size: 14.0,
         transform: CGAffineTransformIdentity,
         blend_mode: kCGBlendModeNormal,
         text_transform: None,
         state_stack: Vec::new(),
+        transparency_layers: Vec::new(),
     };
     let isa = env
         .objc
@@ -215,6 +217,91 @@ fn bytes_per_pixel(data: &CGBitmapContextData) -> GuestUSize {
 fn get_pixels<'a>(data: &CGBitmapContextData, mem: &'a mut Mem) -> &'a mut [u8] {
     let pixel_data_size = data.height.checked_mul(data.bytes_per_row).unwrap();
     mem.bytes_at_mut(data.data.cast(), pixel_data_size)
+}
+
+pub(super) fn begin_transparency_layer(
+    env: &mut Environment,
+    context: CGContextRef,
+) -> Option<TransparencyLayerState> {
+    let bitmap_data = {
+        let host_obj = env.objc.borrow::<CGContextHostObject>(context);
+        let CGContextSubclass::CGBitmapContext(bitmap_data) = host_obj.subclass;
+        bitmap_data
+    };
+
+    if !matches!(
+        bitmap_data.alpha_info,
+        kCGImageAlphaPremultipliedLast
+            | kCGImageAlphaPremultipliedFirst
+            | kCGImageAlphaLast
+            | kCGImageAlphaFirst
+            | kCGImageAlphaOnly
+    ) {
+        return None;
+    }
+
+    let layer_size = bitmap_data
+        .height
+        .checked_mul(bitmap_data.bytes_per_row)
+        .unwrap();
+    let layer_data = env.mem.alloc(layer_size);
+    env.mem.bytes_at_mut(layer_data.cast(), layer_size).fill(0);
+
+    let original_data = bitmap_data.data;
+    let host_obj = env.objc.borrow_mut::<CGContextHostObject>(context);
+    let CGContextSubclass::CGBitmapContext(bitmap_data) = &mut host_obj.subclass;
+    bitmap_data.data = layer_data;
+
+    Some(TransparencyLayerState {
+        original_data,
+        layer_data,
+    })
+}
+
+pub(super) fn end_transparency_layer(
+    env: &mut Environment,
+    context: CGContextRef,
+    layer: TransparencyLayerState,
+) {
+    let mut bitmap_data = {
+        let host_obj = env.objc.borrow::<CGContextHostObject>(context);
+        let CGContextSubclass::CGBitmapContext(bitmap_data) = host_obj.subclass;
+        bitmap_data
+    };
+    let layer_size = bitmap_data
+        .height
+        .checked_mul(bitmap_data.bytes_per_row)
+        .unwrap();
+    let mut layer_pixels = env
+        .mem
+        .bytes_at(layer.layer_data.cast(), layer_size)
+        .to_vec();
+
+    bitmap_data.data = layer.original_data;
+    let host_obj = env.objc.borrow_mut::<CGContextHostObject>(context);
+    let CGContextSubclass::CGBitmapContext(current_data) = &mut host_obj.subclass;
+    current_data.data = layer.original_data;
+    let pixel_size = bytes_per_pixel(&bitmap_data) as usize;
+    {
+        let destination_pixels = get_pixels(&bitmap_data, &mut env.mem);
+        for y in 0..bitmap_data.height {
+            let row_offset = ((bitmap_data.height - 1 - y) * bitmap_data.bytes_per_row) as usize;
+            for x in 0..bitmap_data.width {
+                let pixel_offset = row_offset + x as usize * pixel_size;
+                let color = get_pixel(&bitmap_data, &mut layer_pixels, pixel_offset);
+                put_pixel(
+                    &bitmap_data,
+                    destination_pixels,
+                    (x as i32, y as i32),
+                    color,
+                    true,
+                    kCGBlendModeNormal,
+                );
+            }
+        }
+    }
+
+    env.mem.free(layer.layer_data);
 }
 
 /// Blends two RGBA non gamma-encoded values, with straight alpha,
