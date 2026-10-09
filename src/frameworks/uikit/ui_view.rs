@@ -15,6 +15,7 @@ pub mod ui_label;
 pub mod ui_page_control;
 pub mod ui_picker_view;
 pub mod ui_scroll_view;
+pub mod ui_table_view;
 pub mod ui_web_view;
 pub mod ui_window;
 
@@ -83,6 +84,8 @@ pub(super) struct UIViewHostObject {
     superview: id,
     /// The view controller that controls this view. This is a weak reference
     view_controller: id,
+    /// Root view controller for a window, if any. Strong reference.
+    root_view_controller: id,
     tag: NSInteger,
     clears_context_before_drawing: bool,
     user_interaction_enabled: bool,
@@ -98,6 +101,7 @@ impl Default for UIViewHostObject {
             subviews: Vec::new(),
             superview: nil,
             view_controller: nil,
+            root_view_controller: nil,
             tag: 0,
             clears_context_before_drawing: true,
             user_interaction_enabled: true,
@@ -625,6 +629,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         superview,
         subviews,
         view_controller,
+        root_view_controller,
         tag: _,
         clears_context_before_drawing: _,
         user_interaction_enabled: _,
@@ -632,6 +637,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     } = std::mem::take(env.objc.borrow_mut(this));
 
     release(env, layer);
+    release(env, root_view_controller);
     assert!(view_controller == nil);
     assert!(superview == nil);
     for subview in subviews {

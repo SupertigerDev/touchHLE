@@ -44,6 +44,8 @@ struct UIViewControllerHostObject {
     tab_bar_item: id,
     /// The tab bar controller containing this controller, if any.
     tab_bar_controller: id,
+    /// The navigation controller containing this controller, if any.
+    navigation_controller: id,
 }
 impl HostObject for UIViewControllerHostObject {}
 
@@ -239,6 +241,11 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc
         .borrow::<UIViewControllerHostObject>(this)
         .tab_bar_controller
+}
+- (id)navigationController {
+    env.objc
+        .borrow::<UIViewControllerHostObject>(this)
+        .navigation_controller
 }
 - (())setEditing:(bool)editing {
     todo_objc_setter!(this, editing);

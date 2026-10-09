@@ -160,7 +160,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 + (id)buttonWithType:(UIButtonType)type_ {
-    let button: id = msg![env; this new];
+    let button: id = msg![env; this alloc];
+    let button: id = msg![env; button initWithFrame:(<CGRect as Default>::default())];
     set_type(env, button, type_);
     autorelease(env, button)
 }

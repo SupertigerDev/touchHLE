@@ -22,7 +22,9 @@ use crate::frameworks::uikit::ui_device::{
     UIDeviceOrientationLandscapeLeft, UIDeviceOrientationLandscapeRight,
     UIDeviceOrientationPortraitUpsideDown,
 };
-use crate::objc::{id, msg, msg_class, msg_super, nil, objc_classes, ClassExports};
+use crate::objc::{
+    id, msg, msg_class, msg_super, nil, objc_classes, release, retain, ClassExports,
+};
 
 #[derive(Default)]
 pub struct State {
@@ -118,6 +120,44 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.framework_state.uikit.ui_view.ui_window.key_window == Some(this)
 }
 
+- (())setRootViewController:(id)view_controller {
+    log!("UIWindow {:?} setRootViewController:{:?}", this, view_controller);
+    let old_view_controller = env
+        .objc
+        .borrow::<UIViewHostObject>(this)
+        .root_view_controller;
+    if old_view_controller == view_controller {
+        return;
+    }
+
+    retain(env, view_controller);
+    env.objc
+        .borrow_mut::<UIViewHostObject>(this)
+        .root_view_controller = view_controller;
+
+    if old_view_controller != nil {
+        let old_view: id = msg![env; old_view_controller view];
+        if env.objc.borrow::<UIViewHostObject>(old_view).superview == this {
+            () = msg![env; old_view removeFromSuperview];
+        }
+        release(env, old_view_controller);
+    }
+
+    if view_controller != nil {
+        let view: id = msg![env; view_controller view];
+        let frame: CGRect = msg![env; view frame];
+        log!("UIWindow root controller view {:?} frame {:?}", view, frame);
+        if env.objc.borrow::<UIViewHostObject>(view).superview != this {
+            () = msg![env; this addSubview:view];
+        }
+    }
+}
+- (id)rootViewController {
+    env.objc
+        .borrow::<UIViewHostObject>(this)
+        .root_view_controller
+}
+
 - (())makeKeyAndVisible {
     // TODO: We don't currently have send any non-touch events to windows,
     // so there's no meaning in it yet.
@@ -128,6 +168,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     // TODO: post UIWindowDidBecomeVisibleNotification
     () = msg![env; this setHidden:false];
+    let hidden: bool = msg![env; this isHidden];
+    let subview_count = env.objc.borrow::<UIViewHostObject>(this).subviews.len();
+    log!(
+        "UIWindow {:?} made key and visible; hidden={}, subviews={}",
+        this,
+        hidden,
+        subview_count,
+    );
 }
 
 // We only model the single main screen
@@ -146,7 +194,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())addSubview:(id)view {
-    log_dbg!("[(UIWindow*){:?} addSubview:{:?}] => ()", this, view);
+    log!("UIWindow {:?} addSubview:{:?}", this, view);
 
     if view == nil || env.objc.borrow::<UIViewHostObject>(view).view_controller == nil {
         () = msg_super![env; this addSubview:view];

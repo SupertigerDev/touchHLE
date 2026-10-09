@@ -1552,7 +1552,14 @@ impl Environment {
         }
 
         if self.gdb_server.is_none() {
-            panic!("Error during CPU execution: {error:?}");
+            let regs = self.cpu.regs();
+            panic!(
+                "Error during CPU execution: {error:?} at guest PC {:#x} (LR {:#x}, SP {:#x}, CPSR {:#x})",
+                regs[cpu::Cpu::PC],
+                regs[cpu::Cpu::LR],
+                regs[cpu::Cpu::SP],
+                self.cpu.cpsr(),
+            );
         }
 
         echo!("Debuggable error during CPU execution: {:?}.", error);

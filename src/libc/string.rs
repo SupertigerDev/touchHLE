@@ -141,6 +141,9 @@ fn memmove(
 ) -> MutVoidPtr {
     GenericChar::<u8>::memmove(env, dest.cast(), src.cast(), size, GuestUSize::MAX).cast()
 }
+fn bcopy(env: &mut Environment, src: ConstVoidPtr, dest: MutVoidPtr, size: GuestUSize) {
+    env.mem.memmove(dest, src, size);
+}
 fn __memmove_chk(
     env: &mut Environment,
     dest: MutVoidPtr,
@@ -325,6 +328,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(memcpy(_, _, _)),
     export_c_func!(__memcpy_chk(_, _, _, _)),
     export_c_func!(memmove(_, _, _)),
+    export_c_func!(bcopy(_, _, _)),
     export_c_func!(__memmove_chk(_, _, _, _)),
     export_c_func!(memchr(_, _, _)),
     export_c_func!(memcmp(_, _, _)),

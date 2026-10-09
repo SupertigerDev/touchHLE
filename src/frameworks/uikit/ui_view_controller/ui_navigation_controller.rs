@@ -57,6 +57,9 @@ pub const CLASSES: ClassExports = objc_classes! {
     assert!(!stack.contains(&view_controller));
     stack.push(view_controller);
     retain(env, view_controller);
+    env.objc
+        .borrow_mut::<super::UIViewControllerHostObject>(view_controller)
+        .navigation_controller = this;
 
     let delegate = env.objc.borrow::<UINavigationControllerHostObject>(this).delegate;
     let sel: SEL = env

@@ -15,12 +15,14 @@ use crate::Environment;
 #[allow(non_camel_case_types)]
 struct ifaddrs {}
 
-fn getifaddrs(env: &mut Environment, _ifap: MutPtr<MutPtr<ifaddrs>>) -> i32 {
+fn getifaddrs(env: &mut Environment, ifap: MutPtr<MutPtr<ifaddrs>>) -> i32 {
     // TODO: handle errno properly
     set_errno(env, 0);
 
-    // TODO: implement
-    -1
+    // The emulator currently exposes no host network interfaces.
+    env.mem.write(ifap, MutPtr::null());
+    log!("getifaddrs({:?}) -> empty interface list", ifap);
+    0
 }
 
 fn freeifaddrs(_env: &mut Environment, _ifp: MutPtr<ifaddrs>) {

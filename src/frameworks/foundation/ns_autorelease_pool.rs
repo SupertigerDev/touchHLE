@@ -5,7 +5,9 @@
  */
 //! `NSAutoreleasePool`.
 
-use crate::objc::{id, msg, objc_classes, release, ClassExports, HostObject, NSZonePtr};
+use crate::dyld::{export_c_func, FunctionExports};
+use crate::mem::MutVoidPtr;
+use crate::objc::{id, msg, msg_class, objc_classes, release, ClassExports, HostObject, NSZonePtr};
 use crate::{Environment, ThreadId};
 use std::num::NonZeroU32;
 
@@ -25,6 +27,24 @@ struct NSAutoreleasePoolHostObject {
     objects: Vec<id>,
 }
 impl HostObject for NSAutoreleasePoolHostObject {}
+
+fn objc_autoreleasePoolPush(env: &mut Environment) -> MutVoidPtr {
+    let pool: id = msg_class![env; NSAutoreleasePool new];
+    MutVoidPtr::from_bits(pool.to_bits())
+}
+
+fn objc_autoreleasePoolPop(env: &mut Environment, pool: MutVoidPtr) {
+    if pool.is_null() {
+        return;
+    }
+    let pool: id = pool.cast();
+    () = msg![env; pool drain];
+}
+
+pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(objc_autoreleasePoolPush()),
+    export_c_func!(objc_autoreleasePoolPop(_)),
+];
 
 pub const CLASSES: ClassExports = objc_classes! {
 

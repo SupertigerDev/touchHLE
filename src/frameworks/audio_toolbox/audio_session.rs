@@ -59,6 +59,16 @@ impl Default for State {
     }
 }
 
+impl State {
+    pub(super) fn set_current_hardware_io_buffer_duration(&mut self, duration: f64) {
+        self.current_hardware_io_buffer_duration = duration as f32;
+    }
+
+    pub(super) fn current_hardware_io_buffer_duration(&self) -> f64 {
+        self.current_hardware_io_buffer_duration as f64
+    }
+}
+
 fn AudioSessionInitialize(
     _env: &mut Environment,
     in_run_loop: CFRunLoopRef,

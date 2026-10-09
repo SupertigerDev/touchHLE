@@ -153,6 +153,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     retain(env, this)
 }
 
+- (id)objectAtIndexedSubscript:(NSUInteger)index {
+    msg![env; this objectAtIndex:index]
+}
+
 - (NSUInteger)indexOfObject:(id)object {
     let count: NSUInteger = msg![env; this count];
     for i in 0..count {
@@ -183,6 +187,42 @@ pub const CLASSES: ClassExports = objc_classes! {
         return nil;
     }
     msg![env; this objectAtIndex:(size - 1)]
+}
+
+- (())makeObjectsPerformSelector:(SEL)sel {
+    let count: NSUInteger = msg![env; this count];
+    for idx in 0..count {
+        let obj: id = msg![env; this objectAtIndex:idx];
+        let _: id = msg![env; obj performSelector:sel];
+    }
+}
+
+- (())enumerateObjectsUsingBlock:(id)block_object {
+    assert!(
+        crate::libc::dispatch::is_block(env, block_object),
+        "enumerateObjectsUsingBlock: requires a block"
+    );
+    let block = env.mem.read(block_object.cast::<crate::libc::dispatch::BlockLiteral>());
+    let invoke = block.invoke;
+    let stop = env.mem.alloc_and_write(0i8);
+    let count: NSUInteger = msg![env; this count];
+    for index in 0..count {
+        env.mem.write(stop, 0i8);
+        let object: id = msg![env; this objectAtIndex:index];
+        () = invoke.call_from_host(
+            env,
+            (
+                block_object.cast_const().cast::<std::ffi::c_void>(),
+                object,
+                index,
+                stop,
+            ),
+        );
+        if env.mem.read(stop) != 0 {
+            break;
+        }
+    }
+    env.mem.free(stop.cast());
 }
 
 - (id)componentsJoinedByString:(id)str { // NSString *
@@ -563,14 +603,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     env.objc.dealloc_object(this, &mut env.mem)
-}
-
-- (())makeObjectsPerformSelector:(SEL)sel {
-    let count: NSUInteger = msg![env; this count];
-    for idx in 0..count {
-        let obj: id = msg![env; this objectAtIndex:idx];
-        let _: id = msg![env; obj performSelector:sel];
-    }
 }
 
 - (id)objectEnumerator { // NSEnumerator*

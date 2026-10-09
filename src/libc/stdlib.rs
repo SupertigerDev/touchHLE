@@ -258,6 +258,42 @@ fn div(_env: &mut Environment, numer: i32, denom: i32) -> div_t {
     }
 }
 
+fn __umodsi3(_env: &mut Environment, numerator: u32, denominator: u32) -> u32 {
+    numerator % denominator
+}
+
+fn __udivsi3(_env: &mut Environment, numerator: u32, denominator: u32) -> u32 {
+    numerator / denominator
+}
+
+fn __divsi3(_env: &mut Environment, numerator: i32, denominator: i32) -> i32 {
+    numerator.wrapping_div(denominator)
+}
+
+fn __modsi3(_env: &mut Environment, numerator: i32, denominator: i32) -> i32 {
+    numerator.wrapping_rem(denominator)
+}
+
+fn __udivdi3(_env: &mut Environment, numerator: u64, denominator: u64) -> u64 {
+    numerator / denominator
+}
+
+fn __umoddi3(_env: &mut Environment, numerator: u64, denominator: u64) -> u64 {
+    numerator % denominator
+}
+
+fn __divdi3(_env: &mut Environment, numerator: i64, denominator: i64) -> i64 {
+    numerator.wrapping_div(denominator)
+}
+
+fn __moddi3(_env: &mut Environment, numerator: i64, denominator: i64) -> i64 {
+    numerator.wrapping_rem(denominator)
+}
+
+fn __floatdidf(_env: &mut Environment, value: i64) -> f64 {
+    value as f64
+}
+
 fn getenv(env: &mut Environment, name: ConstPtr<u8>) -> MutPtr<u8> {
     let name_cstr = env.mem.cstr_at(name);
     let Some(&value) = env.env_vars.get(name_cstr) else {
@@ -675,6 +711,15 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(random()),
     export_c_func!(arc4random()),
     export_c_func!(div(_, _)),
+    export_c_func!(__umodsi3(_, _)),
+    export_c_func!(__udivsi3(_, _)),
+    export_c_func!(__divsi3(_, _)),
+    export_c_func!(__modsi3(_, _)),
+    export_c_func!(__udivdi3(_, _)),
+    export_c_func!(__umoddi3(_, _)),
+    export_c_func!(__divdi3(_, _)),
+    export_c_func!(__moddi3(_, _)),
+    export_c_func!(__floatdidf(_)),
     export_c_func!(getenv(_)),
     export_c_func!(setenv(_, _, _)),
     export_c_func!(unsetenv(_)),

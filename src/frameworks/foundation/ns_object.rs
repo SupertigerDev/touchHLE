@@ -75,7 +75,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 + (())cancelPreviousPerformRequestsWithTarget:(id)target selector:(SEL)selector object:(id)arg {
     let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
-    cancel_perform_requests(env, run_loop, target, selector, arg);
+    cancel_perform_requests(env, run_loop, target, Some(selector), Some(arg));
+}
+
++ (())cancelPreviousPerformRequestsWithTarget:(id)target {
+    let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
+    cancel_perform_requests(env, run_loop, target, None, None);
 }
 
 + (bool)accessInstanceVariablesDirectly {

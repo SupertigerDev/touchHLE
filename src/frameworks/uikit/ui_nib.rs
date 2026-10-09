@@ -326,7 +326,38 @@ pub const CLASSES: ClassExports = objc_classes! {
         source
     } = env.objc.borrow(this);
 
+    let label_string = to_rust_string(env, label);
+    log!(
+        "NIB outlet {:?}: source={:?}, destination={:?}",
+        label_string,
+        source,
+        destination,
+    );
+    if label_string == "tabController" {
+        let source_class: crate::objc::Class = msg![env; source class];
+        let has_setter = env
+            .objc
+            .object_has_method_named(&env.mem, source, "setTabController:");
+        let has_ivar = env
+            .objc
+            .object_lookup_ivar(&env.mem, source, &"tabController".to_string())
+            .is_some();
+        log!(
+            "tabController outlet source class {}, setter={}, ivar={}",
+            env.objc.get_class_name(source_class),
+            has_setter,
+            has_ivar,
+        );
+    }
     () = msg![env; source setValue:destination forKey:label];
+    if label_string == "tabController"
+        && env
+            .objc
+            .object_has_method_named(&env.mem, source, "tabController")
+    {
+        let value: id = msg![env; source tabController];
+        log!("tabController outlet getter after connection returned {:?}", value);
+    }
 }
 
 @end
@@ -341,11 +372,27 @@ pub const CLASSES: ClassExports = objc_classes! {
 fn load_nib_file(env: &mut Environment, ui_nib: id, path: GuestPathBuf) -> Result<id, ()> {
     let path = ns_string::from_rust_string(env, path.as_str().to_string());
     assert!(msg![env; path isAbsolutePath]);
-    let ns_data: id = msg_class![env; NSData dataWithContentsOfFile:path];
+    let mut ns_data: id = msg_class![env; NSData dataWithContentsOfFile:path];
+    if ns_data == nil {
+        // Newer compiled nibs are package directories containing runtime.nib
+        // and objects.nib rather than a single file.
+        let runtime_nib_name = get_static_str(env, "runtime.nib");
+        let runtime_nib_path: id = msg![env; path stringByAppendingPathComponent:runtime_nib_name];
+        ns_data = msg_class![env; NSData dataWithContentsOfFile:runtime_nib_path];
+        if ns_data != nil {
+            log_dbg!(
+                "Loading nib archive from package path {:?}",
+                runtime_nib_path
+            );
+        }
+    }
     if ns_data == nil {
         // Apparently it's permitted to specify the nib file key in the
         // Info.plist, yet not have it point to a valid nib file?!
-        log!("Warning: couldn't load nib file {:?}", path);
+        log!(
+            "Warning: couldn't load nib file or package runtime archive at {:?}",
+            path
+        );
         return Err(());
     };
 

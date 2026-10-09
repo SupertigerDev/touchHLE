@@ -43,7 +43,7 @@ pub use objects::{
 pub use properties::todo_objc_setter;
 pub use selectors::{selector, SEL};
 
-use crate::mem::ConstVoidPtr;
+use crate::mem::{ConstVoidPtr, GuestISize, MutVoidPtr};
 use crate::Environment;
 pub(crate) use classes::class_getMethodImplementation;
 use classes::{
@@ -79,6 +79,9 @@ pub struct ObjC {
     /// Look at the `isa` to get the metaclass for a class.
     classes: HashMap<String, Class>,
 
+    /// Guest memory locations containing non-retaining object references.
+    weak_references: HashMap<MutVoidPtr, id>,
+
     /// Mutexes used in @synchronized blocks (objc_sync_enter/exit).
     sync_mutexes: HashMap<id, MutexId>,
 
@@ -97,6 +100,7 @@ impl ObjC {
             selectors: HashMap::new(),
             objects: HashMap::new(),
             classes: HashMap::new(),
+            weak_references: HashMap::new(),
             sync_mutexes: HashMap::new(),
             initializer_threads: HashMap::new(),
             message_type_info: None,
@@ -124,15 +128,169 @@ const CONSTANTS: ConstantExports = &[
 /// could still be called on even if minimal iOS version is set to 3.x?
 ///
 /// ref. <https://clang.llvm.org/docs/Block-ABI-Apple.html#runtime-helper-functions>
-fn _Block_object_dispose(_env: &mut Environment, object: ConstVoidPtr, flags: i32) {
-    // `BLOCK_FIELD_IS_BYREF` flag defines an on stack structure holding
-    // the __block variable. It is _probably_ safe to ignore.
-    // TODO: properly implement for block support
-    assert!(flags == 8); // BLOCK_FIELD_IS_BYREF
-    log!(
-        "Warning: Ignoring _Block_object_dispose({:?}, BLOCK_FIELD_IS_BYREF)",
-        object
-    );
+fn _Block_object_assign(
+    env: &mut Environment,
+    destination: MutVoidPtr,
+    object: ConstVoidPtr,
+    flags: i32,
+) {
+    let object_type = flags & 0xf;
+    let object = object.cast_mut().cast();
+    let value = match object_type {
+        3 => {
+            if flags & 0x10 == 0 {
+                objc_retain(env, object)
+            } else {
+                object
+            }
+        }
+        7 => crate::libc::dispatch::copy_block(env, object),
+        8 => {
+            log!("Warning: Ignoring _Block_object_assign for __block variable");
+            object
+        }
+        _ => panic!("Unsupported _Block_object_assign flags {flags:#x}"),
+    };
+    env.mem.write(destination.cast(), value);
+}
+
+fn _Block_object_dispose(env: &mut Environment, object: ConstVoidPtr, flags: i32) {
+    let object_type = flags & 0xf;
+    match object_type {
+        3 if flags & 0x10 == 0 => objc_release(env, object.cast_mut().cast()),
+        3 => {}
+        7 => crate::libc::dispatch::release_block(env, object.cast_mut().cast()),
+        8 => {
+            log!("Warning: Ignoring _Block_object_dispose for __block variable");
+        }
+        _ => panic!("Unsupported _Block_object_dispose flags {flags:#x}"),
+    }
+}
+
+fn objc_storeWeak(env: &mut Environment, location: MutVoidPtr, object: id) -> id {
+    assert!(!location.is_null());
+    env.objc.weak_references.insert(location, object);
+    env.mem.write(location.cast(), object);
+    object
+}
+
+fn objc_setProperty_atomic(
+    env: &mut Environment,
+    object: id,
+    selector: SEL,
+    value: id,
+    offset: GuestISize,
+) {
+    objc_setProperty(env, object, selector, offset, value, true, 0)
+}
+
+fn objc_setProperty_nonatomic(
+    env: &mut Environment,
+    object: id,
+    selector: SEL,
+    value: id,
+    offset: GuestISize,
+) {
+    objc_setProperty(env, object, selector, offset, value, false, 0)
+}
+
+fn objc_setProperty_atomic_copy(
+    env: &mut Environment,
+    object: id,
+    selector: SEL,
+    value: id,
+    offset: GuestISize,
+) {
+    objc_setProperty(env, object, selector, offset, value, true, 1)
+}
+
+fn objc_setProperty_nonatomic_copy(
+    env: &mut Environment,
+    object: id,
+    selector: SEL,
+    value: id,
+    offset: GuestISize,
+) {
+    objc_setProperty(env, object, selector, offset, value, false, 1)
+}
+
+fn objc_retain(env: &mut Environment, object: id) -> id {
+    if crate::libc::dispatch::is_block(env, object) {
+        return crate::libc::dispatch::copy_block(env, object);
+    }
+    retain(env, object)
+}
+
+fn objc_release(env: &mut Environment, object: id) {
+    if crate::libc::dispatch::is_block(env, object) {
+        crate::libc::dispatch::release_block(env, object);
+        return;
+    }
+    release(env, object)
+}
+
+fn objc_autorelease(env: &mut Environment, object: id) -> id {
+    if crate::libc::dispatch::is_block(env, object) {
+        return crate::libc::dispatch::copy_block(env, object);
+    }
+    autorelease(env, object)
+}
+
+fn objc_retainAutoreleasedReturnValue(env: &mut Environment, object: id) -> id {
+    objc_retain(env, object)
+}
+
+fn objc_retainAutorelease(env: &mut Environment, object: id) -> id {
+    let object = objc_retain(env, object);
+    objc_autorelease(env, object)
+}
+
+fn objc_retainAutoreleaseReturnValue(env: &mut Environment, object: id) -> id {
+    let object = objc_retain(env, object);
+    objc_autorelease(env, object)
+}
+
+fn objc_autoreleaseReturnValue(env: &mut Environment, object: id) -> id {
+    objc_autorelease(env, object)
+}
+
+fn objc_unsafeClaimAutoreleasedReturnValue(_env: &mut Environment, object: id) -> id {
+    object
+}
+
+fn objc_initWeak(env: &mut Environment, location: MutVoidPtr, object: id) -> id {
+    objc_storeWeak(env, location, object)
+}
+
+fn objc_loadWeakRetained(env: &mut Environment, location: MutVoidPtr) -> id {
+    assert!(!location.is_null());
+    let object: id = env.mem.read(location.cast());
+    retain(env, object);
+    object
+}
+
+fn objc_loadWeak(env: &mut Environment, location: MutVoidPtr) -> id {
+    let object = objc_loadWeakRetained(env, location);
+    autorelease(env, object)
+}
+
+fn objc_destroyWeak(env: &mut Environment, location: MutVoidPtr) {
+    assert!(!location.is_null());
+    env.objc.weak_references.remove(&location);
+    env.mem.write(location.cast(), nil);
+}
+
+fn objc_copyWeak(env: &mut Environment, destination: MutVoidPtr, source: MutVoidPtr) {
+    assert!(!source.is_null());
+    let object: id = env.mem.read(source.cast());
+    objc_storeWeak(env, destination, object);
+}
+
+fn objc_moveWeak(env: &mut Environment, destination: MutVoidPtr, source: MutVoidPtr) {
+    assert!(!source.is_null());
+    let object: id = env.mem.read(source.cast());
+    objc_destroyWeak(env, source);
+    objc_storeWeak(env, destination, object);
 }
 
 const FUNCTIONS: FunctionExports = &[
@@ -147,10 +305,30 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(objc_getClass(_)),
     export_c_func!(objc_getProperty(_, _, _, _)),
     export_c_func!(objc_setProperty(_, _, _, _, _, _)),
+    export_c_func!(objc_setProperty_atomic(_, _, _, _)),
+    export_c_func!(objc_setProperty_nonatomic(_, _, _, _)),
+    export_c_func!(objc_setProperty_atomic_copy(_, _, _, _)),
+    export_c_func!(objc_setProperty_nonatomic_copy(_, _, _, _)),
     export_c_func!(objc_copyStruct(_, _, _, _, _)),
     export_c_func!(objc_sync_enter(_)),
     export_c_func!(objc_sync_exit(_)),
     export_c_func!(object_getClass(_)),
     export_c_func!(sel_registerName(_)),
+    export_c_func!(_Block_object_assign(_, _, _)),
     export_c_func!(_Block_object_dispose(_, _)),
+    export_c_func!(objc_retain(_)),
+    export_c_func!(objc_release(_)),
+    export_c_func!(objc_autorelease(_)),
+    export_c_func!(objc_retainAutoreleasedReturnValue(_)),
+    export_c_func!(objc_retainAutorelease(_)),
+    export_c_func!(objc_retainAutoreleaseReturnValue(_)),
+    export_c_func!(objc_autoreleaseReturnValue(_)),
+    export_c_func!(objc_unsafeClaimAutoreleasedReturnValue(_)),
+    export_c_func!(objc_storeWeak(_, _)),
+    export_c_func!(objc_initWeak(_, _)),
+    export_c_func!(objc_loadWeakRetained(_)),
+    export_c_func!(objc_loadWeak(_)),
+    export_c_func!(objc_destroyWeak(_)),
+    export_c_func!(objc_copyWeak(_, _)),
+    export_c_func!(objc_moveWeak(_, _)),
 ];

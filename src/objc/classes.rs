@@ -40,7 +40,7 @@ pub(super) struct ClassHostObject {
     pub(super) superclass: Class,
     pub(super) methods: HashMap<SEL, IMP>,
     pub(super) guest_method_signatures: HashMap<SEL, ConstPtr<u8>>,
-    /// Maps ivar name to a tuple of an offset (as pointer) and an alignment.
+    /// Maps ivar name to a tuple of its guest offset word and alignment.
     /// (Alignment is used during ivar reconciliation.)
     pub(super) ivars: HashMap<String, (ConstPtr<GuestUSize>, u32)>,
     /// Offset into the allocated memory for the object where the ivars of
@@ -747,13 +747,17 @@ impl ObjC {
                     let align_mask = max_alignment - 1;
                     diff = (diff + align_mask) & !align_mask;
 
-                    for (offset, _) in ivars.values_mut() {
+                    for (offset, _) in ivars.values() {
                         if offset.is_null() {
                             // anonymous bitfield
                             continue;
                         }
 
-                        *offset = Ptr::from_bits((*offset).to_bits() + diff);
+                        let old_offset: GuestUSize = mem.read(*offset);
+                        let new_offset = old_offset
+                            .checked_add(diff)
+                            .expect("reconciled Objective-C ivar offset overflow");
+                        mem.write((*offset).cast_mut(), new_offset);
                     }
                 }
 

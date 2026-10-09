@@ -35,6 +35,7 @@ pub type AudioUnit = AudioComponentInstance;
 type AudioUnitPropertyID = u32;
 type AudioUnitScope = u32;
 type AudioUnitElement = u32;
+type AudioUnitParameterID = u32;
 
 #[repr(C, packed)]
 pub struct AudioBufferList<const COUNT: usize> {
@@ -60,16 +61,19 @@ const kAudioUnitProperty_SampleRate: AudioUnitPropertyID = 2;
 const kAudioUnitProperty_SetRenderCallback: AudioUnitPropertyID = 23;
 const kAudioUnitProperty_MaximumFramesPerSlice: AudioUnitPropertyID = 14;
 const kAudioUnitProperty_StreamFormat: AudioUnitPropertyID = 8;
+const kAudioUnitProperty_ElementCount: AudioUnitPropertyID = 11;
+const kAudioUnitProperty_FactoryPresets: AudioUnitPropertyID = 24;
+const kAudioUnitErr_PropertyNotInUse: OSStatus = -10850;
 
 const kAudioOutputUnitProperty_EnableIO: AudioUnitPropertyID = 2003;
 
-fn AudioUnitInitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
+pub(super) fn AudioUnitInitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
     let run_loop = CFRunLoopGetMain(env);
     ns_run_loop::add_audio_unit(env, run_loop, in_unit);
     0 // success
 }
 
-fn AudioUnitUninitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
+pub(super) fn AudioUnitUninitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
     let run_loop = CFRunLoopGetMain(env);
     match ns_run_loop::remove_audio_unit(env, run_loop, in_unit) {
         Ok(_) => 0,
@@ -86,8 +90,6 @@ fn AudioUnitSetProperty(
     in_data: ConstVoidPtr,
     in_data_size: u32,
 ) -> OSStatus {
-    assert!(in_element == 0);
-
     let host_object = audio_components::State::get(&mut env.framework_state)
         .audio_component_instances
         .get_mut(&in_unit)
@@ -116,16 +118,65 @@ fn AudioUnitSetProperty(
             result = 0;
             log_dbg!("AudioUnitSetProperty({:?}, kAudioUnitProperty_StreamFormat, {:?}, {:?}, {:?}, {:?}) -> {:?}", in_unit, in_scope, in_element, stream_format, in_data_size, result);
         }
+        kAudioUnitProperty_SampleRate => {
+            assert_eq!(in_data_size, guest_size_of::<f64>());
+            let sample_rate = env.mem.read(in_data.cast::<f64>());
+            match in_scope {
+                kAudioUnitScope_Global => {
+                    host_object.global_stream_format.sample_rate = sample_rate;
+                }
+                kAudioUnitScope_Input => {
+                    let mut format = host_object
+                        .input_stream_format
+                        .unwrap_or(host_object.global_stream_format);
+                    format.sample_rate = sample_rate;
+                    host_object.input_stream_format = Some(format);
+                }
+                kAudioUnitScope_Output => {
+                    let mut format = host_object
+                        .output_stream_format
+                        .unwrap_or(host_object.global_stream_format);
+                    format.sample_rate = sample_rate;
+                    host_object.output_stream_format = Some(format);
+                }
+                _ => return paramErr,
+            }
+            result = 0;
+        }
         kAudioOutputUnitProperty_EnableIO => {
-            assert_eq!(in_scope, kAudioUnitScope_Output);
             assert_eq!(in_data_size, guest_size_of::<u32>());
             let enabled = env.mem.read(in_data.cast::<u32>());
-            // Output is enabled by default.
-            assert_eq!(enabled, 1);
+            match (in_scope, in_element) {
+                (kAudioUnitScope_Output, 0) => host_object.output_enabled = enabled != 0,
+                (kAudioUnitScope_Input, 1) => host_object.input_enabled = enabled != 0,
+                _ => return paramErr,
+            }
             result = 0;
             log_dbg!("AudioUnitSetProperty({:?}, kAudioOutputUnitProperty_EnableIO, {:?}, {:?}, {:?}, {:?}) -> {:?}", in_unit, in_scope, in_element, enabled, in_data_size, result);
         }
-        _ => unimplemented!(),
+        kAudioUnitProperty_ElementCount => {
+            assert_eq!(in_data_size, guest_size_of::<u32>());
+            let count = env.mem.read(in_data.cast::<u32>());
+            match in_scope {
+                kAudioUnitScope_Input => host_object.input_element_count = count,
+                kAudioUnitScope_Output => host_object.output_element_count = count,
+                _ => return paramErr,
+            }
+            result = 0;
+        }
+        kAudioUnitProperty_MaximumFramesPerSlice => {
+            assert_eq!(in_scope, kAudioUnitScope_Global);
+            assert_eq!(in_data_size, guest_size_of::<u32>());
+            host_object.maximum_frames_per_slice = env.mem.read(in_data.cast::<u32>());
+            result = 0;
+        }
+        _ => unimplemented!(
+            "AudioUnitSetProperty id {} scope {} element {} size {}",
+            in_id,
+            in_scope,
+            in_element,
+            in_data_size
+        ),
     };
 
     result
@@ -136,12 +187,10 @@ fn AudioUnitGetProperty(
     in_unit: AudioUnit,
     in_id: AudioUnitPropertyID,
     in_scope: AudioUnitScope,
-    in_element: AudioUnitElement,
+    _in_element: AudioUnitElement,
     out_data: MutVoidPtr,
     io_data_size: MutPtr<u32>,
 ) -> OSStatus {
-    assert!(in_element == 0);
-
     let host_object = audio_components::State::get(&mut env.framework_state)
         .audio_component_instances
         .get_mut(&in_unit)
@@ -152,6 +201,16 @@ fn AudioUnitGetProperty(
             assert_eq!(env.mem.read(io_data_size), guest_size_of::<u32>());
             let max_frames: u32 = host_object.maximum_frames_per_slice;
             env.mem.write(out_data.cast(), max_frames);
+            env.mem.write(io_data_size.cast(), guest_size_of::<u32>());
+        }
+        kAudioUnitProperty_ElementCount => {
+            assert_eq!(env.mem.read(io_data_size), guest_size_of::<u32>());
+            let count = match in_scope {
+                kAudioUnitScope_Input => host_object.input_element_count,
+                kAudioUnitScope_Output => host_object.output_element_count,
+                _ => return paramErr,
+            };
+            env.mem.write(out_data.cast(), count);
             env.mem.write(io_data_size.cast(), guest_size_of::<u32>());
         }
         kAudioUnitProperty_StreamFormat => {
@@ -192,12 +251,34 @@ fn AudioUnitGetProperty(
             env.mem.write(out_data.cast(), sample_rate);
             env.mem.write(io_data_size.cast(), guest_size_of::<f64>());
         }
+        kAudioUnitProperty_FactoryPresets => return kAudioUnitErr_PropertyNotInUse,
         _ => unimplemented!("in_id {}", in_id),
     };
     0 // success
 }
 
-fn AudioOutputUnitStart(env: &mut Environment, ci: AudioUnit) -> OSStatus {
+pub(super) fn AudioUnitSetParameter(
+    env: &mut Environment,
+    unit: AudioUnit,
+    parameter_id: AudioUnitParameterID,
+    scope: AudioUnitScope,
+    element: AudioUnitElement,
+    value: f32,
+    _buffer_offset: u32,
+) -> OSStatus {
+    let Some(host_object) = audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .get_mut(&unit)
+    else {
+        return paramErr;
+    };
+    host_object
+        .parameter_values
+        .insert((parameter_id, scope, element), value);
+    0
+}
+
+pub(super) fn AudioOutputUnitStart(env: &mut Environment, ci: AudioUnit) -> OSStatus {
     let context = env
         .framework_state
         .audio_toolbox
@@ -224,7 +305,7 @@ fn AudioOutputUnitStart(env: &mut Environment, ci: AudioUnit) -> OSStatus {
     result
 }
 
-fn AudioOutputUnitStop(env: &mut Environment, ci: AudioUnit) -> OSStatus {
+pub(super) fn AudioOutputUnitStop(env: &mut Environment, ci: AudioUnit) -> OSStatus {
     let at_state = &mut env.framework_state.audio_toolbox;
     let context = at_state
         .al_context
@@ -476,6 +557,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(AudioUnitUninitialize(_)),
     export_c_func!(AudioUnitSetProperty(_, _, _, _, _, _)),
     export_c_func!(AudioUnitGetProperty(_, _, _, _, _, _)),
+    export_c_func!(AudioUnitSetParameter(_, _, _, _, _, _)),
     export_c_func!(AudioOutputUnitStart(_)),
     export_c_func!(AudioOutputUnitStop(_)),
 ];

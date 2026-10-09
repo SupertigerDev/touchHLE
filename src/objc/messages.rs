@@ -35,7 +35,11 @@ pub(super) struct ThreadInitializer {
 }
 
 fn maybe_initialize_class(env: &mut Environment, receiver: id) {
-    let class_host_object = env.objc.get_host_object(receiver).unwrap();
+    let Some(class_host_object) = env.objc.get_host_object(receiver) else {
+        // Only Class objects need +initialize handling here. Some runtime
+        // objects do not have host-side object storage.
+        return;
+    };
     let Some(&super::ClassHostObject {
         superclass,
         is_metaclass,
@@ -191,6 +195,22 @@ fn objc_msgSend_inner(
         return;
     }
 
+    let receiver_is_block = super2.is_none() && crate::libc::dispatch::is_block(env, receiver);
+    if receiver_is_block {
+        match selector.as_str(&env.mem) {
+            "retain" | "autorelease" | "copy" => {
+                let block = crate::libc::dispatch::copy_block(env, receiver);
+                env.cpu.regs_mut()[0] = block.to_bits();
+                return;
+            }
+            "release" => {
+                crate::libc::dispatch::release_block(env, receiver);
+                return;
+            }
+            _ => {}
+        }
+    }
+
     let orig_class = super2.unwrap_or_else(|| ObjC::read_isa(receiver, &env.mem));
     if orig_class == nil {
         let regs = env.cpu.regs();
@@ -241,7 +261,21 @@ fn objc_msgSend_inner(
             );
         }
 
-        let host_object = env.objc.get_host_object(class).unwrap();
+        let Some(host_object) = env.objc.get_host_object(class) else {
+            let regs = env.cpu.regs();
+            panic!(
+                "Objective-C class chain contains unknown class {:?} while sending \
+                 selector \"{}\" to {:?} (original class {:?}, known name {:?}) \
+                 at guest PC {:#x} (LR {:#x})!",
+                class,
+                selector.as_str(&env.mem),
+                receiver,
+                orig_class,
+                env.objc.try_get_class_name(orig_class),
+                regs[crate::cpu::Cpu::PC],
+                regs[crate::cpu::Cpu::LR],
+            );
+        };
 
         if let Some(&super::ClassHostObject {
             superclass,

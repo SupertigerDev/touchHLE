@@ -17,6 +17,7 @@ pub mod crypto;
 pub mod ctype;
 pub mod cxxabi;
 pub mod dirent;
+pub mod dispatch;
 pub mod dlfcn;
 pub mod dns_sd;
 pub mod errno;
@@ -50,7 +51,13 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     path: "/usr/lib/libSystem.B.dylib",
     aliases: &["/usr/lib/libSystem.dylib"],
     class_exports: &[],
-    constant_exports: &[ctype::CONSTANTS, stdio::CONSTANTS, mach::init::CONSTANTS],
+    constant_exports: &[
+        ctype::CONSTANTS,
+        stdio::CONSTANTS,
+        dispatch::CONSTANTS,
+        mach::init::CONSTANTS,
+        STACK_GUARD,
+    ],
     function_exports: &[
         arpa::inet::FUNCTIONS,
         clocale::FUNCTIONS,
@@ -58,6 +65,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         cxxabi::FUNCTIONS,
         crypto::FUNCTIONS,
         dirent::FUNCTIONS,
+        dispatch::FUNCTIONS,
         dlfcn::FUNCTIONS,
         dns_sd::FUNCTIONS,
         errno::FUNCTIONS,
@@ -114,6 +122,13 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     ],
 };
 
+const STACK_GUARD: crate::dyld::ConstantExports = &[(
+    "___stack_chk_guard",
+    crate::dyld::HostConstant::Custom(|env| {
+        env.mem.alloc_and_write(0x595e9fbd_u32).cast().cast_const()
+    }),
+)];
+
 /// Container for state of various child modules
 #[derive(Default)]
 pub struct State {
@@ -134,4 +149,5 @@ pub struct State {
     mach_vm: mach::vm_map::State,
     malloc: malloc::State,
     mman: sys::mman::State,
+    pub dispatch: dispatch::State,
 }

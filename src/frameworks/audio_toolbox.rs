@@ -25,6 +25,7 @@ macro_rules! return_if_null {
 
 pub mod audio_components;
 pub mod audio_file;
+pub mod audio_graph;
 pub mod audio_queue;
 pub mod audio_services;
 pub mod audio_session;
@@ -39,6 +40,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     function_exports: &[
         audio_components::FUNCTIONS,
         audio_file::FUNCTIONS,
+        audio_graph::FUNCTIONS,
         audio_queue::FUNCTIONS,
         audio_services::FUNCTIONS,
         audio_session::FUNCTIONS,
@@ -53,6 +55,7 @@ pub struct State {
     audio_queue: audio_queue::State,
     audio_services: audio_services::State,
     audio_components: audio_components::State,
+    pub(super) audio_graph: audio_graph::State,
     audio_session: audio_session::State,
     al_context: LazyALContext,
     extended_audio_file: extended_audio_file::State,
@@ -60,6 +63,19 @@ pub struct State {
 impl State {
     pub(crate) fn set_current_hardware_sample_rate(&mut self, sample_rate: f64) {
         self.audio_session.current_hardware_sample_rate = sample_rate;
+    }
+
+    pub(crate) fn current_hardware_sample_rate(&self) -> f64 {
+        self.audio_session.current_hardware_sample_rate
+    }
+
+    pub(crate) fn set_current_hardware_io_buffer_duration(&mut self, duration: f64) {
+        self.audio_session
+            .set_current_hardware_io_buffer_duration(duration);
+    }
+
+    pub(crate) fn current_hardware_io_buffer_duration(&self) -> f64 {
+        self.audio_session.current_hardware_io_buffer_duration()
     }
 
     pub fn make_al_context_current<'s, 'manager: 's>(

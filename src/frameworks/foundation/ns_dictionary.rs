@@ -426,6 +426,16 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new_dict)
 }
 
++ (id)dictionaryWithObjects:(ConstPtr<id>)objects
+                    forKeys:(ConstPtr<id>)keys
+                      count:(NSUInteger)count {
+    let keys_and_objects: Vec<_> = (0..count)
+        .map(|i| (env.mem.read(keys + i), env.mem.read(objects + i)))
+        .collect();
+    let dictionary = dict_from_keys_and_objects(env, &keys_and_objects);
+    autorelease(env, dictionary)
+}
+
 + (id)dictionaryWithDictionary:(id)dict { // NSDictionary*
     let new_dict: id = msg![env; this alloc];
     let new_dict: id = msg![env; new_dict initWithDictionary:dict];
@@ -477,6 +487,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     // TODO: strip '@' and call super
     assert!(!key_str.starts_with('@'));
     msg![env; this objectForKey:key]
+}
+
+- (id)objectForKeyedSubscript:(id)key {
+    msg![env; this objectForKey:key]
+}
+
+- (id)keyEnumerator {
+    let keys: id = msg![env; this allKeys];
+    msg![env; keys objectEnumerator]
 }
 
 - (NSUInteger)hash {
@@ -559,6 +578,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     let new: id = msg![env; this alloc];
     let new: id = msg![env; new initWithCapacity:capacity];
     autorelease(env, new)
+}
+
+- (())setObject:(id)object
+ forKeyedSubscript:(id)key {
+    if object == nil {
+        () = msg![env; this removeObjectForKey:key];
+    } else {
+        () = msg![env; this setObject:object forKey:key];
+    }
 }
 
 // These probably comes from some category related to plists.

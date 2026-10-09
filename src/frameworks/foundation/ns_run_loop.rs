@@ -252,41 +252,40 @@ pub(super) fn cancel_perform_requests(
     env: &mut Environment,
     run_loop: id,
     target: id,
-    selector: SEL,
-    argument: id,
+    selector: Option<SEL>,
+    argument: Option<id>,
 ) {
-    log_dbg!(
-        "Removing object selector request {target:?} {:?} {argument:?} on run loop {run_loop:?}",
-        selector.as_str(env.mem.as_mut())
-    );
+    log_dbg!("Removing object selector requests for {target:?} on run loop {run_loop:?}");
     let mut new_selector_objects = VecDeque::new();
     let host_object = env.objc.borrow_mut::<NSRunLoopHostObject>(run_loop);
     let mut selector_objects = std::mem::take(&mut host_object.selector_objects);
     while let Some(obj) = selector_objects.pop_front() {
-        if obj.target != target || obj.selector != selector {
+        if obj.target != target || selector.is_some_and(|selector| obj.selector != selector) {
             new_selector_objects.push_back(obj);
             continue;
         }
-        let curr_arg = obj.argument;
-        let arg_equal = if curr_arg.is_null() {
-            argument.is_null()
-        } else {
-            msg![env; curr_arg isEqual:argument]
-        };
-        if arg_equal {
-            let ObjectSelectorSource {
-                target,
-                argument,
-                semaphore,
-                ..
-            } = obj;
-            release(env, target);
-            release(env, argument);
-            if !semaphore.is_null() {
-                sem_post(env, semaphore);
+        if let Some(argument) = argument {
+            let current_argument = obj.argument;
+            let arg_equal = if current_argument.is_null() {
+                argument.is_null()
+            } else {
+                msg![env; current_argument isEqual:argument]
+            };
+            if !arg_equal {
+                new_selector_objects.push_back(obj);
+                continue;
             }
-        } else {
-            new_selector_objects.push_back(obj);
+        };
+        let ObjectSelectorSource {
+            target,
+            argument,
+            semaphore,
+            ..
+        } = obj;
+        release(env, target);
+        release(env, argument);
+        if !semaphore.is_null() {
+            sem_post(env, semaphore);
         }
     }
     env.objc

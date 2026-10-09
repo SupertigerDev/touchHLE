@@ -27,6 +27,7 @@ pub struct State {
 struct UIApplicationHostObject {
     delegate: id,
     delegate_is_retained: bool,
+    main_nib_top_level_objects: id,
 }
 impl HostObject for UIApplicationHostObject {}
 
@@ -58,6 +59,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let host_object = Box::new(UIApplicationHostObject {
         delegate: nil,
         delegate_is_retained: false,
+        main_nib_top_level_objects: nil,
     });
     env.objc.alloc_static_object(this, host_object, &mut env.mem)
 }
@@ -301,8 +303,12 @@ pub(super) fn UIApplicationMain(
             if res != nil {
                 let nib: id = msg_class![env; UINib nibWithNibName:ns_main_nib_filename bundle:nil];
                 release(env, ns_main_nib_filename);
-                let _: id = msg![env; nib instantiateWithOwner:ui_application
-                                               options:nil];
+                let top_level_objects: id = msg![env; nib instantiateWithOwner:ui_application
+                                                          options:nil];
+                retain(env, top_level_objects);
+                env.objc
+                    .borrow_mut::<UIApplicationHostObject>(ui_application)
+                    .main_nib_top_level_objects = top_level_objects;
             } else {
                 log!(
                     "Warning: couldn't load main nib file {:?}",
@@ -357,6 +363,7 @@ pub(super) fn UIApplicationMain(
             delegate,
             "application:didFinishLaunchingWithOptions:",
         ) {
+            log!("Calling app delegate application:didFinishLaunchingWithOptions:");
             let empty_dict: id = msg_class![env; NSDictionary dictionary];
             () = msg![env; delegate application:ui_application didFinishLaunchingWithOptions:empty_dict];
         } else if env.objc.object_has_method_named(
@@ -364,7 +371,34 @@ pub(super) fn UIApplicationMain(
             delegate,
             "applicationDidFinishLaunching:",
         ) {
+            log!("Calling app delegate applicationDidFinishLaunching:");
             () = msg![env; delegate applicationDidFinishLaunching:ui_application];
+        }
+
+        let windows: id = msg![env; ui_application windows];
+        let window_count: NSUInteger = msg![env; windows count];
+        let key_window: id = msg![env; ui_application keyWindow];
+        log!(
+            "App launch callback returned: {} windows, key window {:?}",
+            window_count,
+            key_window
+        );
+        if env
+            .objc
+            .object_has_method_named(&env.mem, delegate, "window")
+        {
+            let delegate_window: id = msg![env; delegate window];
+            log!("App delegate window getter returned {:?}", delegate_window);
+        }
+        if env
+            .objc
+            .object_has_method_named(&env.mem, delegate, "tabController")
+        {
+            let tab_controller: id = msg![env; delegate tabController];
+            log!(
+                "App delegate tabController getter returned {:?}",
+                tab_controller
+            );
         }
 
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
@@ -498,6 +532,7 @@ const UIApplicationWillTerminateNotification: &str = "UIApplicationWillTerminate
 /// Other app notifications
 const UIApplicationLaunchOptionsRemoteNotificationKey: &str =
     "UIApplicationLaunchOptionsRemoteNotificationKey";
+const UIApplicationLaunchOptionsURLKey: &str = "UIApplicationLaunchOptionsURLKey";
 const UIApplicationDidReceiveMemoryWarningNotification: &str =
     "UIApplicationDidReceiveMemoryWarningNotification";
 
@@ -535,6 +570,10 @@ pub const CONSTANTS: ConstantExports = &[
     (
         "_UIApplicationLaunchOptionsRemoteNotificationKey",
         HostConstant::NSString(UIApplicationLaunchOptionsRemoteNotificationKey),
+    ),
+    (
+        "_UIApplicationLaunchOptionsURLKey",
+        HostConstant::NSString(UIApplicationLaunchOptionsURLKey),
     ),
 ];
 

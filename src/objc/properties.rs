@@ -175,7 +175,20 @@ pub(super) fn objc_setProperty(
     let value: id = if value != nil {
         match should_copy {
             0 => retain(env, value),
-            1 => msg![env; value copyWithZone:void_null],
+            1 => {
+                if env
+                    .objc
+                    .object_has_method_named(&env.mem, value, "copyWithZone:")
+                {
+                    msg![env; value copyWithZone:void_null]
+                } else {
+                    log!(
+                        "Warning: Copy property value {:?} does not implement NSCopying; retaining it by identity",
+                        value
+                    );
+                    retain(env, value)
+                }
+            }
             2 => msg![env; value mutableCopyWithZone:void_null],
             // Apple's source code implies that any non-zero value that isn't 2
             // should mean "copy", but that seems weird, let's be conservative.

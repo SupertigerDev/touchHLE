@@ -341,6 +341,16 @@ impl super::ObjC {
     /// Deallocate an object. Do not call this directly unless you're
     /// implementing `dealloc` and are sure you don't need to do a super-call.
     pub fn dealloc_object(&mut self, object: id, mem: &mut Mem) {
+        let weak_locations: Vec<_> = self
+            .weak_references
+            .iter()
+            .filter_map(|(&location, &weak_object)| (weak_object == object).then_some(location))
+            .collect();
+        for location in weak_locations {
+            self.weak_references.remove(&location);
+            mem.write(location.cast(), nil);
+        }
+
         let HostObjectEntry {
             host_object,
             refcount,

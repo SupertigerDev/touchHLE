@@ -20,8 +20,8 @@ use crate::frameworks::core_audio_types::{
 };
 use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, SafeRead};
 
-const kAudioUnitType_Output: u32 = fourcc(b"auou");
-const kAudioUnitSubType_RemoteIO: u32 = fourcc(b"rioc");
+pub(super) const kAudioUnitType_Output: u32 = fourcc(b"auou");
+pub(super) const kAudioUnitSubType_RemoteIO: u32 = fourcc(b"rioc");
 const kAudioUnitManufacturer_Apple: u32 = fourcc(b"appl");
 
 #[derive(Default)]
@@ -40,6 +40,10 @@ impl State {
 pub struct AudioComponentInstanceHostObject {
     pub started: bool,
     pub maximum_frames_per_slice: u32,
+    pub input_element_count: u32,
+    pub output_element_count: u32,
+    pub input_enabled: bool,
+    pub output_enabled: bool,
     pub global_stream_format: AudioStreamBasicDescription,
     pub input_stream_format: Option<AudioStreamBasicDescription>,
     pub output_stream_format: Option<AudioStreamBasicDescription>,
@@ -47,6 +51,17 @@ pub struct AudioComponentInstanceHostObject {
     pub last_render_time: Option<Instant>,
     pub al_source: Option<ALuint>,
     pub is_running_handler: bool,
+    pub parameter_values: HashMap<(u32, u32, u32), f32>,
+}
+
+pub(super) fn create_audio_component_instance(env: &mut Environment) -> AudioComponentInstance {
+    let guest_instance: AudioComponentInstance = env
+        .mem
+        .alloc_and_write(OpaqueAudioComponentInstance { _pad: 0 });
+    State::get(&mut env.framework_state)
+        .audio_component_instances
+        .insert(guest_instance, AudioComponentInstanceHostObject::default());
+    guest_instance
 }
 impl Default for AudioComponentInstanceHostObject {
     fn default() -> Self {
@@ -56,6 +71,10 @@ impl Default for AudioComponentInstanceHostObject {
             started: false,
             // returning 1024 based on https://developer.apple.com/documentation/audiotoolbox/kaudiounitproperty_maximumframesperslice
             maximum_frames_per_slice: 1024,
+            input_element_count: 1,
+            output_element_count: 1,
+            input_enabled: false,
+            output_enabled: true,
             global_stream_format: AudioStreamBasicDescription {
                 sample_rate: 44100.0,
                 format_id: kAudioFormatLinearPCM,
@@ -76,6 +95,7 @@ impl Default for AudioComponentInstanceHostObject {
             last_render_time: None,
             al_source: None,
             is_running_handler: false,
+            parameter_values: HashMap::new(),
         }
     }
 }
@@ -91,29 +111,30 @@ unsafe impl SafeRead for AURenderCallbackStruct {}
 
 #[repr(C, packed)]
 pub struct OpaqueAudioComponent {
-    _pad: u8,
+    pub(super) _pad: u8,
 }
 unsafe impl SafeRead for OpaqueAudioComponent {}
 
-type AudioComponent = MutPtr<OpaqueAudioComponent>;
+pub type AudioComponent = MutPtr<OpaqueAudioComponent>;
 
 pub type AURenderCallback = GuestFunction;
 
 #[repr(C, packed)]
 pub struct OpaqueAudioComponentInstance {
-    _pad: u8,
+    pub(super) _pad: u8,
 }
 unsafe impl SafeRead for OpaqueAudioComponentInstance {}
 
 pub type AudioComponentInstance = MutPtr<OpaqueAudioComponentInstance>;
 
+#[derive(Copy, Clone)]
 #[repr(C, packed)]
-struct AudioComponentDescription {
-    component_type: u32,
-    component_sub_type: u32,
-    component_manufacturer: u32,
-    component_flags: u32,
-    component_flags_mask: u32,
+pub struct AudioComponentDescription {
+    pub component_type: u32,
+    pub component_sub_type: u32,
+    pub component_manufacturer: u32,
+    pub component_flags: u32,
+    pub component_flags_mask: u32,
 }
 unsafe impl SafeRead for AudioComponentDescription {}
 
@@ -150,14 +171,7 @@ fn AudioComponentInstanceNew(
     in_component: AudioComponent,
     out_instance: MutPtr<AudioComponentInstance>,
 ) -> OSStatus {
-    let host_object = AudioComponentInstanceHostObject::default();
-
-    let guest_instance: AudioComponentInstance = env
-        .mem
-        .alloc_and_write(OpaqueAudioComponentInstance { _pad: 0 });
-    State::get(&mut env.framework_state)
-        .audio_component_instances
-        .insert(guest_instance, host_object);
+    let guest_instance = create_audio_component_instance(env);
 
     env.mem.write(out_instance, guest_instance);
 
@@ -171,7 +185,7 @@ fn AudioComponentInstanceNew(
     result
 }
 
-fn AudioComponentInstanceDispose(
+pub(super) fn AudioComponentInstanceDispose(
     env: &mut Environment,
     in_instance: AudioComponentInstance,
 ) -> OSStatus {

@@ -5,6 +5,7 @@
  */
 //! `UIImage`.
 
+use crate::abi::GuestArg;
 use crate::frameworks::core_graphics::cg_context::CGContextDrawImage;
 use crate::frameworks::core_graphics::cg_image::{
     self, CGImageGetHeight, CGImageGetWidth, CGImageRef, CGImageRelease, CGImageRetain,
@@ -23,6 +24,34 @@ use crate::Environment;
 use std::collections::HashMap;
 
 const CACHE_SIZE: usize = 60;
+
+#[derive(Debug)]
+#[repr(C, packed)]
+struct UIEdgeInsets {
+    top: CGFloat,
+    left: CGFloat,
+    bottom: CGFloat,
+    right: CGFloat,
+}
+impl GuestArg for UIEdgeInsets {
+    const REG_COUNT: usize = 4;
+
+    fn from_regs(regs: &[u32]) -> Self {
+        Self {
+            top: GuestArg::from_regs(&regs[0..1]),
+            left: GuestArg::from_regs(&regs[1..2]),
+            bottom: GuestArg::from_regs(&regs[2..3]),
+            right: GuestArg::from_regs(&regs[3..4]),
+        }
+    }
+
+    fn to_regs(self, regs: &mut [u32]) {
+        self.top.to_regs(&mut regs[0..1]);
+        self.left.to_regs(&mut regs[1..2]);
+        self.bottom.to_regs(&mut regs[2..3]);
+        self.right.to_regs(&mut regs[3..4]);
+    }
+}
 
 #[derive(Default)]
 pub struct State {
@@ -142,6 +171,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)stretchableImageWithLeftCapWidth:(NSInteger)_leftCapWidth
                           topCapHeight:(NSInteger)_topCapHeight {
     log!("TODO: properly support stretchableImageWithLeftCapWidth:topCapHeight:");
+    retain(env, this)
+}
+- (id)resizableImageWithCapInsets:(UIEdgeInsets)_cap_insets {
+    log!("TODO: properly support resizableImageWithCapInsets:");
     retain(env, this)
 }
 
