@@ -401,6 +401,12 @@ int test_vsnprintf() {
   }
   free(str);
   // Test sign prepend
+  str = str_format("%+d", 31501);
+  if (strcmp(str, "+31501") != 0) {
+    free(str);
+    return -1000;
+  }
+  free(str);
   str = str_format("%+08d", 31501);
   if (strcmp(str, "+0031501") != 0) {
     free(str);

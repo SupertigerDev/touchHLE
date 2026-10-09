@@ -286,32 +286,34 @@ pub fn printf_inner<const NS_LOG: bool, F: Fn(&Mem, GuestUSize) -> u8>(
                     int.into()
                 };
 
-                let int_with_precision = if precision.is_some_and(|value| value > 0) {
+                let mut int_with_precision = if precision.is_some_and(|value| value > 0) {
                     format!("{:01$}", int, precision.unwrap())
                 } else {
                     format!("{int}")
                 };
+                if prepend_sign && specifier != b'u' && int >= 0 {
+                    int_with_precision.insert(0, '+');
+                }
 
                 if pad_width > 0 {
                     let pad_width = pad_width as usize;
                     if pad_char == '0' && precision.is_none() {
-                        if prepend_sign {
-                            assert!(int != 0); // TODO
-                            assert!(pad_width > 0);
-                            if int > 0 {
-                                write!(&mut res, "+{:0>1$}", int, pad_width - 1).unwrap();
-                            } else {
-                                write!(&mut res, "-{:0>1$}", int.abs(), pad_width - 1).unwrap();
-                            }
-                        } else {
-                            write!(&mut res, "{int:0>pad_width$}").unwrap();
+                        let sign_len = usize::from(
+                            int_with_precision.starts_with('-')
+                                || int_with_precision.starts_with('+'),
+                        );
+                        if sign_len > 0 {
+                            res.push(int_with_precision.as_bytes()[0]);
                         }
+                        let padding = pad_width.saturating_sub(int_with_precision.len());
+                        res.resize(res.len() + padding, b'0');
+                        res.extend_from_slice(int_with_precision.as_bytes().get(sign_len..).unwrap());
                     } else {
-                        assert!(!prepend_sign);
-                        write!(&mut res, "{int_with_precision:>pad_width$}").unwrap();
+                        let padding = pad_width.saturating_sub(int_with_precision.len());
+                        res.resize(res.len() + padding, b' ');
+                        res.extend_from_slice(int_with_precision.as_bytes());
                     }
                 } else {
-                    assert!(!prepend_sign);
                     res.extend_from_slice(int_with_precision.as_bytes());
                 }
             }
