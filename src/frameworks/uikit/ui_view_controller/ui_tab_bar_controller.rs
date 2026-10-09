@@ -45,6 +45,7 @@ impl_HostObject_with_superclass!(UITabBarHostObject);
 struct UITabBarItemHostObject {
     title: id,
     image: id,
+    badge_value: id,
     tag: NSInteger,
 }
 impl HostObject for UITabBarItemHostObject {}
@@ -459,12 +460,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg![env; this initWithTitle:title image:nil tag:tag]
 }
 - (())dealloc {
-    let (title, image) = {
+    let (title, image, badge_value) = {
         let host_object = env.objc.borrow::<UITabBarItemHostObject>(this);
-        (host_object.title, host_object.image)
+        (host_object.title, host_object.image, host_object.badge_value)
     };
     release(env, title);
     release(env, image);
+    release(env, badge_value);
     msg_super![env; this dealloc]
 }
 - (id)title {
@@ -488,6 +490,17 @@ pub const CLASSES: ClassExports = objc_classes! {
         image,
     );
     release(env, old_image);
+}
+- (id)badgeValue {
+    env.objc.borrow::<UITabBarItemHostObject>(this).badge_value
+}
+- (())setBadgeValue:(id)value {
+    retain(env, value);
+    let old_value = std::mem::replace(
+        &mut env.objc.borrow_mut::<UITabBarItemHostObject>(this).badge_value,
+        value,
+    );
+    release(env, old_value);
 }
 - (NSInteger)tag {
     env.objc.borrow::<UITabBarItemHostObject>(this).tag
