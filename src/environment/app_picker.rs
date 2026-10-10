@@ -432,7 +432,11 @@ fn app_picker_inner(
         msg_class![env; UIColor grayColor]
     };
 
-    let brand_label_count = if crate::branding() == "UNOFFICIAL" { 0 } else { 7 };
+    let brand_label_count = if crate::branding() == "UNOFFICIAL" {
+        0
+    } else {
+        7
+    };
     for i in 1..=brand_label_count {
         let label_frame = CGRect {
             origin: CGPoint {

@@ -41,6 +41,12 @@ public class MainActivity extends SDLActivity {
     }
 
     @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        finish();
+    }
+
+    @Override
     protected String[] getLibraries() {
         return new String[]{
             "SDL2",
