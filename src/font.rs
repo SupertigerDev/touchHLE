@@ -148,6 +148,9 @@ impl Font {
     pub fn serif_italic() -> Font {
         Self::from_resource_file("LiberationSerif-Italic.ttf")
     }
+    pub fn sans_condensed_bold() -> Font {
+        Self::from_resource_file("HelveticaNeue-CondensedBold.ttf")
+    }
     pub fn sans_regular_ja() -> Font {
         Self::from_resource_file("NotoSansJP-Regular.otf")
     }

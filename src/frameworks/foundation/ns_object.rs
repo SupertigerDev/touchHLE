@@ -244,6 +244,33 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg_send(env, (this, sel, value, key));
 }
 
+- (id)valueForKey:(id)key { // NSString*
+    let key_string = to_rust_string(env, key).to_string();
+    assert!(key_string.is_ascii());
+    let camel_case_key_string = format!("{}{}", key_string.as_bytes()[0].to_ascii_uppercase() as char, &key_string[1..]);
+    let class = msg![env; this class];
+
+    // Only object-returning accessors and ivars are supported.
+    for name in [key_string.clone(), format!("is{camel_case_key_string}"), format!("_{key_string}")] {
+        if let Some(sel) = env.objc.lookup_selector(&name) {
+            if env.objc.class_has_method(class, sel) {
+                let res: id = msg_send(env, (this, sel));
+                return res;
+            }
+        }
+    }
+
+    if let Some(ivar_ptr) = env.objc.object_lookup_ivar(&env.mem, this, &format!("_{key_string}"))
+        .or_else(|| env.objc.object_lookup_ivar(&env.mem, this, &key_string))
+    {
+        return env.mem.read(ivar_ptr.cast());
+    }
+
+    // TODO: Raise NSUnknownKeyException
+    log!("TODO: valueForKey:{:?} on {:?} has no accessor, returning nil", key_string, this);
+    nil
+}
+
 - (())setValue:(id)_value
 forUndefinedKey:(id)key { // NSString*
     // TODO: Raise NSUnknownKeyException

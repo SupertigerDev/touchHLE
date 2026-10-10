@@ -55,6 +55,11 @@ const kAudioUnitScope_Global: AudioUnitScope = 0;
 const kAudioUnitScope_Input: AudioUnitScope = 1;
 const kAudioUnitScope_Output: AudioUnitScope = 2;
 
+const k3DMixerParam_Azimuth: AudioUnitParameterID = 0;
+const k3DMixerParam_Gain: AudioUnitParameterID = 3;
+const k3DMixerParam_PlaybackRate: AudioUnitParameterID = 4;
+const k3DMixerParam_Enable: AudioUnitParameterID = 5;
+
 const kAudioUnitProperty_SampleRate: AudioUnitPropertyID = 2;
 const kAudioUnitProperty_SetRenderCallback: AudioUnitPropertyID = 23;
 const kAudioUnitProperty_MaximumFramesPerSlice: AudioUnitPropertyID = 14;
@@ -514,21 +519,33 @@ fn mix_input_into_output(
     output: &mut [u8],
     output_format: &AudioStreamBasicDescription,
     number_frames: u32,
+    sample_phase: f64,
+    playback_rate: f32,
+    azimuth: f32,
     gain: f32,
 ) {
     let input_bytes_per_sample = (input_format.bits_per_channel / 8) as usize;
     let output_bytes_per_sample = (output_format.bits_per_channel / 8) as usize;
     let input_channels = input_format.channels_per_frame as usize;
     let output_channels = output_format.channels_per_frame as usize;
+    let input_frames = input.len() / input_format.bytes_per_frame as usize;
+    let pan = azimuth.to_radians().sin().clamp(-1.0, 1.0);
 
     for frame in 0..number_frames as usize {
+        let source_position = sample_phase + frame as f64 * playback_rate as f64;
+        let source_frame = (source_position.floor() as usize).min(input_frames - 1);
+        let next_source_frame = (source_frame + 1).min(input_frames - 1);
+        let interpolation = (source_position - source_position.floor()) as f32;
         for output_channel in 0..output_channels {
-            let input_channel = if input_channels == 1 {
-                0
+            let (input_channel, channel_gain) = if input_channels == 1 && output_channels >= 2 {
+                let channel_pan = if output_channel == 0 { pan } else { -pan };
+                (0, (1.0 - channel_pan.max(0.0)).max(0.0))
             } else {
-                output_channel.min(input_channels - 1)
+                (output_channel.min(input_channels - 1), 1.0)
             };
-            let input_offset = frame * input_format.bytes_per_frame as usize
+            let input_offset = source_frame * input_format.bytes_per_frame as usize
+                + input_channel * input_bytes_per_sample;
+            let next_input_offset = next_source_frame * input_format.bytes_per_frame as usize
                 + input_channel * input_bytes_per_sample;
             let output_offset = frame * output_format.bytes_per_frame as usize
                 + output_channel * output_bytes_per_sample;
@@ -536,12 +553,19 @@ fn mix_input_into_output(
                 &input[input_offset..input_offset + input_bytes_per_sample],
                 input_format,
             );
+            let next_input_sample = read_normalized_sample(
+                &input[next_input_offset..next_input_offset + input_bytes_per_sample],
+                input_format,
+            );
             let output_sample = read_normalized_sample(
                 &output[output_offset..output_offset + output_bytes_per_sample],
                 output_format,
             );
             write_normalized_sample(
-                output_sample + input_sample * gain,
+                output_sample
+                    + (input_sample + (next_input_sample - input_sample) * interpolation)
+                        * gain
+                        * channel_gain,
                 &mut output[output_offset..output_offset + output_bytes_per_sample],
                 output_format,
             );
@@ -768,18 +792,46 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
             .bytes_at_mut(buffer1Data.cast(), buffer_size)
             .fill(0);
         for (source_audio_unit, bus, callback, input_format) in &graph_input_callbacks {
-            let parameters = &audio_components::State::get(&mut env.framework_state)
+            let (gain_db, azimuth, playback_rate, enabled) = {
+                let source = audio_components::State::get(&mut env.framework_state)
+                    .audio_component_instances
+                    .get(source_audio_unit)
+                    .unwrap();
+                let parameters = &source.parameter_values;
+                (
+                    parameters
+                        .get(&(k3DMixerParam_Gain, kAudioUnitScope_Input, *bus))
+                        .copied()
+                        .unwrap_or(0.0),
+                    parameters
+                        .get(&(k3DMixerParam_Azimuth, kAudioUnitScope_Input, *bus))
+                        .copied()
+                        .unwrap_or(0.0),
+                    parameters
+                        .get(&(k3DMixerParam_PlaybackRate, kAudioUnitScope_Input, *bus))
+                        .copied()
+                        .filter(|rate| rate.is_finite() && *rate > 0.0)
+                        .unwrap_or(1.0),
+                    parameters
+                        .get(&(k3DMixerParam_Enable, kAudioUnitScope_Input, *bus))
+                        .copied()
+                        .unwrap_or(1.0)
+                        != 0.0,
+                )
+            };
+            let phase = audio_components::State::get(&mut env.framework_state)
                 .audio_component_instances
-                .get(source_audio_unit)
+                .get(&audio_unit)
                 .unwrap()
-                .parameter_values;
-            let gain_db = parameters
-                .get(&(3, kAudioUnitScope_Input, *bus))
+                .graph_input_sample_phases
+                .get(&(*source_audio_unit, *bus))
                 .copied()
                 .unwrap_or(0.0);
-            let gain = 10.0f32.powf(gain_db / 20.0);
+            let source_frames_exact = phase + number_frames as f64 * playback_rate as f64;
+            let source_frames = source_frames_exact.floor().max(1.0) as u32;
+            let next_phase = (source_frames_exact - source_frames as f64).max(0.0);
             env.mem.write(action_flags, 0);
-            let input_buffer_size = number_frames * input_format.bytes_per_frame;
+            let input_buffer_size = source_frames * input_format.bytes_per_frame;
             let scratch_buffer = env.mem.alloc(input_buffer_size);
             let audio_buffer_list_for_bus = env.mem.alloc_and_write(AudioBufferList::<1> {
                 number_buffers: 1,
@@ -800,29 +852,42 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
                     action_flags,
                     time_stamp.cast_const(),
                     *bus,
-                    number_frames,
+                    source_frames,
                     audio_buffer_list_for_bus.cast::<MutVoidPtr>(),
                 ),
             );
             callback_statuses.push((*bus, callback_status));
+
+            audio_components::State::get(&mut env.framework_state)
+                .audio_component_instances
+                .get_mut(&audio_unit)
+                .unwrap()
+                .graph_input_sample_phases
+                .insert((*source_audio_unit, *bus), next_phase);
 
             let input = env
                 .mem
                 .bytes_at(scratch_buffer.cast(), input_buffer_size)
                 .to_vec();
             let nonzero_bytes = input.iter().filter(|&&byte| byte != 0).count();
-            if nonzero_bytes > 0 {
+            if enabled && nonzero_bytes > 0 {
                 callback_audio_stats.push((*bus, nonzero_bytes, *input_format));
             }
-            let output = env.mem.bytes_at_mut(buffer1Data.cast(), buffer_size);
-            mix_input_into_output(
-                &input,
-                input_format,
-                output,
-                &stream_format,
-                number_frames,
-                gain,
-            );
+            if enabled {
+                let gain = 10.0f32.powf(gain_db / 20.0);
+                let output = env.mem.bytes_at_mut(buffer1Data.cast(), buffer_size);
+                mix_input_into_output(
+                    &input,
+                    input_format,
+                    output,
+                    &stream_format,
+                    number_frames,
+                    phase,
+                    playback_rate,
+                    azimuth,
+                    gain,
+                );
+            }
             env.mem.free(scratch_buffer.cast_void());
             env.mem.free(audio_buffer_list_for_bus.cast());
         }

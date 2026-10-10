@@ -178,6 +178,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     todo_objc_setter!(this, size);
 }
 
+- (())setHighlighted:(bool)highlighted {
+    todo_objc_setter!(this, highlighted);
+}
+
+- (())setHighlightedTextColor:(id)color { // UIColor*
+    todo_objc_setter!(this, color);
+}
+
 - (id)textColor {
     env.objc.borrow::<UILabelHostObject>(this).text_color
 }

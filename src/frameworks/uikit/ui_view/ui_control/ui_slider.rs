@@ -292,6 +292,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow::<UISliderHostObject>(this).value
 }
 - (())setValue:(f32)value {
+    log!(
+        "UISlider {:?} setValue:{} (previous {})",
+        this,
+        value,
+        env.objc.borrow::<UISliderHostObject>(this).value
+    );
     let slider = env.objc.borrow_mut::<UISliderHostObject>(this);
     slider.value = value;
     clamp_value(slider);

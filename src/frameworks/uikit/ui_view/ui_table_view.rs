@@ -5,10 +5,10 @@
  */
 //! Basic `UITableView` and `UITableViewCell` support.
 
+use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::frameworks::foundation::{NSInteger, NSUInteger};
 use crate::frameworks::uikit::ui_view::{ui_scroll_view::UIScrollViewHostObject, UIViewHostObject};
-use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::objc::{
     id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil, objc_classes, release,
     retain, ClassExports, NSZonePtr,
@@ -20,6 +20,8 @@ const SECTION_HEADER_HEIGHT: CGFloat = 22.0;
 struct UITableViewHostObject {
     superclass: UIScrollViewHostObject,
     data_source: id,
+    style: NSInteger,
+    background_view: id,
     row_height: f32,
     separator_style: NSInteger,
     allows_selection: bool,
@@ -27,8 +29,11 @@ struct UITableViewHostObject {
     cells: Vec<(id, NSInteger, NSInteger)>,
     /// Retained section header views.
     header_views: Vec<id>,
+    selected_row: Option<(NSInteger, NSInteger)>,
     touch_start_offset: CGPoint,
     editing: bool,
+    /// Retained (identifier, UINib*) pairs from `registerNib:...`.
+    registered_nibs: Vec<(id, id)>,
 }
 impl_HostObject_with_superclass!(UITableViewHostObject);
 impl Default for UITableViewHostObject {
@@ -36,13 +41,17 @@ impl Default for UITableViewHostObject {
         Self {
             superclass: Default::default(),
             data_source: nil,
+            style: 0,
+            background_view: nil,
             row_height: 44.0,
             separator_style: 1,
             allows_selection: true,
             cells: Vec::new(),
             header_views: Vec::new(),
+            selected_row: None,
             touch_start_offset: CGPoint { x: 0.0, y: 0.0 },
             editing: false,
+            registered_nibs: Vec::new(),
         }
     }
 }
@@ -52,6 +61,9 @@ struct UITableViewCellHostObject {
     reuse_identifier: id,
     selection_style: NSInteger,
     accessory_type: NSInteger,
+    background_view: id,
+    selected_background_view: id,
+    selected: bool,
     /// Owned by the cell's subview list, so non-retaining here.
     text_label: id,
     detail_text_label: id,
@@ -64,6 +76,9 @@ impl Default for UITableViewCellHostObject {
             reuse_identifier: nil,
             selection_style: 0,
             accessory_type: 0,
+            background_view: nil,
+            selected_background_view: nil,
+            selected: false,
             text_label: nil,
             detail_text_label: nil,
         }
@@ -93,6 +108,36 @@ fn make_cell_label(env: &mut crate::Environment, cell: id, font_size: CGFloat) -
     label
 }
 
+/// There is no cell reuse, so this always builds a fresh cell from the nib
+/// registered for `identifier`, or returns nil if there is none.
+fn instantiate_registered_cell(env: &mut crate::Environment, table: id, identifier: id) -> id {
+    let registered = env
+        .objc
+        .borrow::<UITableViewHostObject>(table)
+        .registered_nibs
+        .clone();
+    for (registered_id, nib) in registered {
+        let equal: bool = msg![env; registered_id isEqualToString:identifier];
+        if !equal {
+            continue;
+        }
+        let owner: id = msg![env; table dataSource];
+        let owner = if owner != nil { owner } else { table };
+        let objects: id = msg![env; nib instantiateWithOwner:owner options:nil];
+        let count: NSUInteger = msg![env; objects count];
+        for i in 0..count {
+            let object: id = msg![env; objects objectAtIndex:i];
+            let cell_class = env.objc.get_known_class("UITableViewCell", &mut env.mem);
+            let is_cell: bool = msg![env; object isKindOfClass:cell_class];
+            if is_cell {
+                log!("UITableView {:?} instantiated nib cell {:?}", table, object);
+                return object;
+            }
+        }
+    }
+    nil
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -102,6 +147,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)allocWithZone:(NSZonePtr)_zone {
     env.objc
         .alloc_object(this, Box::<UITableViewHostObject>::default(), &mut env.mem)
+}
+
+- (id)initWithFrame:(CGRect)frame
+              style:(NSInteger)style {
+    let this: id = msg_super![env; this initWithFrame:frame];
+    env.objc.borrow_mut::<UITableViewHostObject>(this).style = style;
+    this
 }
 
 - (id)initWithCoder:(id)coder {
@@ -118,8 +170,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow_mut::<UITableViewHostObject>(this).separator_style = separator_style;
 
     let key = get_static_str(env, "UIAllowSelectingCells");
-    let allows_selection: bool = msg![env; coder decodeBoolForKey:key];
-    env.objc.borrow_mut::<UITableViewHostObject>(this).allows_selection = allows_selection;
+    // Nibs omit this key when it has its default value, which is true.
+    let has_key: bool = msg![env; coder containsValueForKey:key];
+    if has_key {
+        let allows_selection: bool = msg![env; coder decodeBoolForKey:key];
+        env.objc.borrow_mut::<UITableViewHostObject>(this).allows_selection = allows_selection;
+    }
 
     this
 }
@@ -127,9 +183,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())dealloc {
     let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
     let data_source = host.data_source;
+    let background_view = host.background_view;
     let cells = std::mem::take(&mut host.cells);
     let header_views = std::mem::take(&mut host.header_views);
     release(env, data_source);
+    if background_view != nil {
+        () = msg![env; background_view removeFromSuperview];
+        release(env, background_view);
+    }
     for (cell, _, _) in cells {
         release(env, cell);
     }
@@ -146,6 +207,32 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc
         .borrow_mut::<UITableViewHostObject>(this)
         .data_source = data_source;
+}
+
+- (id)backgroundView {
+    env.objc.borrow::<UITableViewHostObject>(this).background_view
+}
+- (())setBackgroundView:(id)view {
+    let old_view = env
+        .objc
+        .borrow::<UITableViewHostObject>(this)
+        .background_view;
+    if old_view == view {
+        return;
+    }
+    if old_view != nil {
+        () = msg![env; old_view removeFromSuperview];
+        release(env, old_view);
+    }
+    if view != nil {
+        retain(env, view);
+        let bounds: CGRect = msg![env; this bounds];
+        () = msg![env; view setFrame:bounds];
+        () = msg![env; this insertSubview:view atIndex:0i32];
+    }
+    env.objc
+        .borrow_mut::<UITableViewHostObject>(this)
+        .background_view = view;
 }
 
 - (f32)rowHeight {
@@ -197,6 +284,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     let has_heights = responds_to(env, delegate, "tableView:heightForRowAtIndexPath:");
 
     let section_count: NSUInteger = msg![env; this numberOfSections];
+    log!(
+        "UITableView {:?} reloadData: sections={}, width={}, data_source={:?}, has_titles={}",
+        this,
+        section_count,
+        width,
+        data_source,
+        has_titles
+    );
     let mut y: CGFloat = 0.0;
     for section in 0..section_count as NSInteger {
         if has_titles {
@@ -224,6 +319,14 @@ pub const CLASSES: ClassExports = objc_classes! {
         for row in 0..row_count as NSInteger {
             let index_path: id = msg_class![env; NSIndexPath indexPathForRow:row inSection:section];
             let cell: id = msg![env; this cellForRowAtIndexPath:index_path];
+            log!(
+                "UITableView {:?} section {} has {} rows; row {} cell={:?}",
+                this,
+                section,
+                row_count,
+                row,
+                cell
+            );
             if cell == nil {
                 continue;
             }
@@ -237,6 +340,16 @@ pub const CLASSES: ClassExports = objc_classes! {
                 size: CGSize { width, height },
             })];
             () = msg![env; cell layoutSubviews];
+            let is_selected = env
+                .objc
+                .borrow::<UITableViewHostObject>(this)
+                .selected_row
+                == Some((section, row));
+            if is_selected {
+                let gray: id = msg_class![env; UIColor lightGrayColor];
+                () = msg![env; cell setBackgroundColor:gray];
+            }
+            () = msg![env; cell setSelected:is_selected animated:false];
             () = msg![env; this addSubview:cell];
             retain(env, cell);
             env.objc
@@ -263,25 +376,84 @@ pub const CLASSES: ClassExports = objc_classes! {
     let start_offset = env.objc.borrow::<UITableViewHostObject>(this).touch_start_offset;
     let offset: CGPoint = msg![env; this contentOffset];
     let allows_selection = env.objc.borrow::<UITableViewHostObject>(this).allows_selection;
+    log!(
+        "UITableView {:?} touchesEnded: allows_selection={}, offset={:?}, start_offset={:?}",
+        this,
+        allows_selection,
+        offset,
+        start_offset
+    );
     // Only treat it as a tap if the table didn't scroll.
-    if allows_selection && offset == start_offset {
+    let offset_delta_x = (offset.x - start_offset.x).abs();
+    let offset_delta_y = (offset.y - start_offset.y).abs();
+    if allows_selection && offset_delta_x <= 2.0 && offset_delta_y <= 2.0 {
         let touch_arr: id = msg![env; touches allObjects];
         let touch: id = msg![env; touch_arr objectAtIndex:0u32];
         let mut view: id = msg![env; touch view];
+        log!("UITableView {:?} touch ended on view {:?}", this, view);
         let mut found = None;
         while view != nil && view != this {
             let host = env.objc.borrow::<UITableViewHostObject>(this);
             if let Some(&(_, section, row)) = host.cells.iter().find(|&&(c, _, _)| c == view) {
-                found = Some((section, row));
+                found = Some((section, row, view));
                 break;
             }
             view = msg![env; view superview];
         }
-        if let Some((section, row)) = found {
+        if let Some((section, row, cell)) = found {
+            let previous_row = env
+                .objc
+                .borrow::<UITableViewHostObject>(this)
+                .selected_row;
+            if let Some((previous_section, previous_row)) = previous_row {
+                if (previous_section, previous_row) != (section, row) {
+                    let previous_cell = env
+                        .objc
+                        .borrow::<UITableViewHostObject>(this)
+                        .cells
+                        .iter()
+                        .find(|&&(_, cell_section, cell_row)| {
+                            (cell_section, cell_row) == (previous_section, previous_row)
+                        })
+                        .map(|&(cell, _, _)| cell);
+                    if let Some(previous_cell) = previous_cell {
+                        let white: id = msg_class![env; UIColor whiteColor];
+                        () = msg![env; previous_cell setBackgroundColor:white];
+                        () = msg![env; previous_cell setSelected:false animated:false];
+                    }
+                }
+            }
+            env.objc.borrow_mut::<UITableViewHostObject>(this).selected_row =
+                Some((section, row));
+            let gray: id = msg_class![env; UIColor lightGrayColor];
+            () = msg![env; cell setBackgroundColor:gray];
+            () = msg![env; cell setSelected:true animated:false];
+
             let delegate: id = msg![env; this delegate];
-            if responds_to(env, delegate, "tableView:didSelectRowAtIndexPath:") {
+            let responds = responds_to(env, delegate, "tableView:didSelectRowAtIndexPath:");
+            log!(
+                "UITableView {:?} row ({}, {}) tapped, delegate {:?} responds={}",
+                this,
+                section,
+                row,
+                delegate,
+                responds
+            );
+            if responds {
                 let index_path: id = msg_class![env; NSIndexPath indexPathForRow:row inSection:section];
                 () = msg![env; delegate tableView:this didSelectRowAtIndexPath:index_path];
+            }
+            let selected_cell = env
+                .objc
+                .borrow::<UITableViewHostObject>(this)
+                .cells
+                .iter()
+                .find(|&&(_, cell_section, cell_row)| {
+                    (cell_section, cell_row) == (section, row)
+                })
+                .map(|&(cell, _, _)| cell);
+            if let Some(selected_cell) = selected_cell {
+                () = msg![env; selected_cell setSelected:true animated:false];
             }
         }
     }
@@ -324,13 +496,24 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
-- (id)dequeueReusableCellWithIdentifier:(id)_identifier {
-    nil
+- (id)dequeueReusableCellWithIdentifier:(id)identifier {
+    instantiate_registered_cell(env, this, identifier)
 }
 
-- (())registerNib:(id)_nib // UINib*
-forCellReuseIdentifier:(id)_identifier { // NSString*
-    log!("TODO: [(UITableView*){:?} registerNib:forCellReuseIdentifier:]", this);
+- (id)dequeueReusableCellWithIdentifier:(id)identifier
+                           forIndexPath:(id)_index_path {
+    instantiate_registered_cell(env, this, identifier)
+}
+
+- (())registerNib:(id)nib // UINib*
+forCellReuseIdentifier:(id)identifier { // NSString*
+    log!("UITableView {:?} registerNib:{:?} forCellReuseIdentifier:{:?}", this, nib, identifier);
+    retain(env, nib);
+    retain(env, identifier);
+    env.objc
+        .borrow_mut::<UITableViewHostObject>(this)
+        .registered_nibs
+        .push((identifier, nib));
 }
 
 - (())registerClass:(id)_class
@@ -422,11 +605,17 @@ forCellReuseIdentifier:(id)_identifier { // NSString*
 }
 
 - (())dealloc {
-    let reuse_identifier = env
-        .objc
-        .borrow_mut::<UITableViewCellHostObject>(this)
-        .reuse_identifier;
+    let (reuse_identifier, background_view, selected_background_view) = {
+        let host = env.objc.borrow_mut::<UITableViewCellHostObject>(this);
+        (
+            host.reuse_identifier,
+            host.background_view,
+            host.selected_background_view,
+        )
+    };
     release(env, reuse_identifier);
+    release(env, background_view);
+    release(env, selected_background_view);
     msg_super![env; this dealloc]
 }
 
@@ -472,8 +661,16 @@ forCellReuseIdentifier:(id)_identifier { // NSString*
     let host = env.objc.borrow::<UITableViewCellHostObject>(this);
     let (text_label, detail_label, accessory) =
         (host.text_label, host.detail_text_label, host.accessory_type);
+    let (background_view, selected_background_view) =
+        (host.background_view, host.selected_background_view);
     let right_inset: CGFloat = if accessory != 0 { 40.0 } else { 10.0 };
     let width = (bounds.size.width - 10.0 - right_inset).max(0.0);
+    if background_view != nil {
+        () = msg![env; background_view setFrame:bounds];
+    }
+    if selected_background_view != nil {
+        () = msg![env; selected_background_view setFrame:bounds];
+    }
     if text_label != nil {
         let frame = if detail_label != nil {
             CGRect {
@@ -518,7 +715,64 @@ forCellReuseIdentifier:(id)_identifier { // NSString*
         .accessory_type = accessory_type;
 }
 
-- (())setSelected:(bool)_selected animated:(bool)_animated {}
+- (())setSelected:(bool)selected animated:(bool)_animated {
+    env.objc.borrow_mut::<UITableViewCellHostObject>(this).selected = selected;
+    let selected_background_view = env
+        .objc
+        .borrow::<UITableViewCellHostObject>(this)
+        .selected_background_view;
+    if selected_background_view != nil {
+        let hidden = !selected;
+        () = msg![env; selected_background_view setHidden:hidden];
+    }
+}
+- (())setBackgroundView:(id)view { // UIView*
+    let old_view = env
+        .objc
+        .borrow::<UITableViewCellHostObject>(this)
+        .background_view;
+    if old_view == view {
+        return;
+    }
+    if old_view != nil {
+        () = msg![env; old_view removeFromSuperview];
+        release(env, old_view);
+    }
+    if view != nil {
+        retain(env, view);
+        () = msg![env; this insertSubview:view atIndex:0i32];
+    }
+    env.objc
+        .borrow_mut::<UITableViewCellHostObject>(this)
+        .background_view = view;
+}
+- (())setSelectedBackgroundView:(id)view { // UIView*
+    let (old_view, background_view) = {
+        let host = env.objc.borrow::<UITableViewCellHostObject>(this);
+        (host.selected_background_view, host.background_view)
+    };
+    if old_view == view {
+        return;
+    }
+    if old_view != nil {
+        () = msg![env; old_view removeFromSuperview];
+        release(env, old_view);
+    }
+    if view != nil {
+        retain(env, view);
+        let index = if background_view != nil { 1i32 } else { 0i32 };
+        () = msg![env; this insertSubview:view atIndex:index];
+        let selected = env.objc.borrow::<UITableViewCellHostObject>(this).selected;
+        let hidden = !selected;
+        () = msg![env; view setHidden:hidden];
+    }
+    env.objc
+        .borrow_mut::<UITableViewCellHostObject>(this)
+        .selected_background_view = view;
+}
+- (())setMultipleSelectionBackgroundView:(id)view { // UIView*
+    todo_objc_setter!(this, view);
+}
 - (())setHighlighted:(bool)_highlighted animated:(bool)_animated {}
 
 @end

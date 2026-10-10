@@ -283,6 +283,10 @@ fn get_value_to_decode_for_key(env: &mut Environment, unarchiver: id, key: id) -
 /// The object returned is retained only by the archiver. Remember to retain and
 /// possibly autorelease it as appropriate.
 fn unarchive_key(env: &mut Environment, unarchiver: id, key: Uid) -> id {
+    // UID 0 is the "$null" marker, which stands for nil.
+    if key.get() == 0 {
+        return nil;
+    }
     let host_obj = borrow_host_obj(env, unarchiver);
     if let Some(existing) = host_obj.already_unarchived[key.get() as usize] {
         return existing;
@@ -330,6 +334,9 @@ fn unarchive_key(env: &mut Environment, unarchiver: id, key: Uid) -> id {
             new_object
         }
         Value::String(s) => {
+            if s == "$null" {
+                return nil;
+            }
             let s = s.to_string();
             from_rust_string(env, s)
         }

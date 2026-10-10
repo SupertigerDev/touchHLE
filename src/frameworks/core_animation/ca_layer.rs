@@ -56,6 +56,7 @@ pub(super) struct CALayerHostObject {
     pub(super) should_rasterize: bool,
     pub(super) rasterization_scale: CGFloat,
     pub(super) corner_radius: CGFloat,
+    mask: id,
     pub(super) needs_display: bool,
     pub(super) needs_display_on_bounds_change: bool,
     /// `CGImageRef*`
@@ -141,6 +142,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         should_rasterize: false,
         rasterization_scale: 1.0,
         corner_radius: 0.0,
+        mask: nil,
         needs_display: false,
         needs_display_on_bounds_change: false,
         contents: nil,
@@ -164,6 +166,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let &mut CALayerHostObject {
         drawable_properties,
         contents,
+        mask,
         superlayer,
         cg_context,
         ref mut sublayers,
@@ -174,9 +177,11 @@ pub const CLASSES: ClassExports = objc_classes! {
     if drawable_properties != nil {
         release(env, drawable_properties);
     }
-
     if contents != nil {
         release(env, contents);
+    }
+    if mask != nil {
+        release(env, mask);
     }
 
     if let Some(cg_context) = cg_context {
@@ -201,6 +206,21 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)superlayer {
     env.objc.borrow::<CALayerHostObject>(this).superlayer
+}
+- (id)mask {
+    env.objc.borrow::<CALayerHostObject>(this).mask
+}
+- (())setMask:(id)mask {
+    if mask != nil {
+        retain(env, mask);
+    }
+    let old_mask = std::mem::replace(
+        &mut env.objc.borrow_mut::<CALayerHostObject>(this).mask,
+        mask,
+    );
+    if old_mask != nil {
+        release(env, old_mask);
+    }
 }
 // TODO: sublayers accessors
 
@@ -745,7 +765,10 @@ fn transform_for_conversion(env: &mut Environment, this: id, other: id) -> CGAff
 
         if this_superlayer == nil && other_superlayer == nil {
             if need_common_ancestor {
-                panic!("Layers {this:?} and {other:?} have no common ancestor!");
+                // UIKit tolerates views from unrelated hierarchies (e.g. a
+                // detached view); treat the layers as sharing a space.
+                log!("Layers {this:?} and {other:?} have no common ancestor, using identity transform");
+                return CGAffineTransformIdentity;
             } else {
                 break (nil, this_transform, other_transform);
             }

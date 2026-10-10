@@ -6,6 +6,7 @@
 //! `UIFont`.
 
 use super::ui_graphics::UIGraphicsGetCurrentContext;
+use crate::dyld::{ConstantExports, HostConstant};
 use crate::font::{Font, TextAlignment, WrapMode};
 use crate::frameworks::core_graphics::cg_bitmap_context::CGBitmapContextDrawer;
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
@@ -15,6 +16,17 @@ use crate::objc::{autorelease, id, msg, objc_classes, ClassExports, HostObject};
 use crate::Environment;
 use std::collections::HashMap;
 use std::ops::Range;
+
+pub const CONSTANTS: ConstantExports = &[
+    (
+        "_NSFontAttributeName",
+        HostConstant::NSString("NSFontAttributeName"),
+    ),
+    (
+        "_UITextAttributeFont",
+        HostConstant::NSString("UITextAttributeFont"),
+    ),
+];
 
 #[derive(Default)]
 pub(super) struct State {
@@ -39,6 +51,7 @@ impl State {
                 FontKind::SerifBold => Font::serif_bold(),
                 FontKind::SerifBoldItalic => Font::serif_bold_italic(),
                 FontKind::SerifItalic => Font::serif_italic(),
+                FontKind::SansCondensedBold => Font::sans_condensed_bold(),
             })
     }
 }
@@ -57,6 +70,7 @@ enum FontKind {
     SerifBold,
     SerifBoldItalic,
     SerifItalic,
+    SansCondensedBold,
 }
 
 struct UIFontHostObject {
@@ -210,7 +224,7 @@ fn get_font<'a>(state: &'a mut State, kind: FontKind, text: &str) -> &'a Font {
                     }
                     return state.sans_regular_ja.as_ref().unwrap();
                 },
-                FontKind::MonoBold | FontKind::MonoBoldItalic | FontKind::SansBold | FontKind::SansBoldItalic | FontKind::SerifBold | FontKind::SerifBoldItalic => {
+                FontKind::MonoBold | FontKind::MonoBoldItalic | FontKind::SansBold | FontKind::SansBoldItalic | FontKind::SansCondensedBold | FontKind::SerifBold | FontKind::SerifBoldItalic => {
                     if state.sans_bold_ja.is_none() {
                         state.sans_bold_ja = Some(Font::sans_bold_ja());
                     }
@@ -463,6 +477,7 @@ fn get_equivalent_font(system_font: &str) -> Option<FontKind> {
         // Font Family: Helvetica Neue
         "HelveticaNeue" => None,
         "HelveticaNeue-Bold" => None,
+        "HelveticaNeue-CondensedBold" => Some(FontKind::SansCondensedBold),
         // Font Family: DB LCD Temp
         "DBLCDTempBlack" => None,
         // Font Family: Verdana

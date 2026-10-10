@@ -46,6 +46,10 @@ struct UIViewControllerHostObject {
     tab_bar_controller: id,
     /// The navigation controller containing this controller, if any.
     navigation_controller: id,
+    /// The view controller presented by this controller, if any.
+    presented_view_controller: id,
+    /// The view controller presenting this controller, if any.
+    presenting_view_controller: id,
 }
 impl HostObject for UIViewControllerHostObject {}
 
@@ -109,6 +113,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         bundle,
         title,
         tab_bar_item,
+        presented_view_controller,
         ..
     } = env.objc.borrow(this);
 
@@ -120,6 +125,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, bundle);
     release(env, title);
     release(env, tab_bar_item);
+    release(env, presented_view_controller);
 
     env.objc.dealloc_object(this, &mut env.mem);
 }
@@ -278,8 +284,82 @@ pub const CLASSES: ClassExports = objc_classes! {
     todo_objc_setter!(this, style);
 }
 
+- (())presentViewController:(id)view_controller
+                    animated:(bool)animated
+                  completion:(id)_completion {
+    if view_controller == nil {
+        panic!("Cannot present a nil view controller");
+    }
+
+    let existing = env
+        .objc
+        .borrow::<UIViewControllerHostObject>(this)
+        .presented_view_controller;
+    if existing != nil {
+        panic!("UIViewController already has a presented view controller");
+    }
+
+    let application: id = msg_class![env; UIApplication sharedApplication];
+    let window: id = msg![env; application keyWindow];
+    if window == nil {
+        panic!("Cannot present a view controller without a key window");
+    }
+
+    let view: id = msg![env; view_controller view];
+    let frame: CGRect = msg![env; window bounds];
+    () = msg![env; view setFrame:frame];
+    () = msg![env; view_controller viewWillAppear:animated];
+    () = msg![env; window addSubview:view];
+    () = msg![env; view_controller viewDidAppear:animated];
+
+    retain(env, view_controller);
+    env.objc
+        .borrow_mut::<UIViewControllerHostObject>(this)
+        .presented_view_controller = view_controller;
+    env.objc
+        .borrow_mut::<UIViewControllerHostObject>(view_controller)
+        .presenting_view_controller = this;
+}
+
+- (())dismissViewControllerAnimated:(bool)animated
+                               completion:(id)_completion {
+    let presented = env
+        .objc
+        .borrow::<UIViewControllerHostObject>(this)
+        .presented_view_controller;
+    let presenter = if presented == nil {
+        env.objc
+            .borrow::<UIViewControllerHostObject>(this)
+            .presenting_view_controller
+    } else {
+        this
+    };
+    let dismissed = if presented == nil { this } else { presented };
+
+    if presenter == nil {
+        return;
+    }
+
+    let view: id = msg![env; dismissed view];
+    () = msg![env; dismissed viewWillDisappear:animated];
+    () = msg![env; view removeFromSuperview];
+    () = msg![env; dismissed viewDidDisappear:animated];
+
+    env.objc
+        .borrow_mut::<UIViewControllerHostObject>(presenter)
+        .presented_view_controller = nil;
+    env.objc
+        .borrow_mut::<UIViewControllerHostObject>(dismissed)
+        .presenting_view_controller = nil;
+    release(env, dismissed);
+}
+
 - (())dismissModalViewControllerAnimated:(bool)animated {
-    log!("TODO: [(UIViewController*){:?} dismissModalViewControllerAnimated:{}]", this, animated); // TODO
+    () = msg![env; this dismissViewControllerAnimated:animated completion:nil];
+}
+- (())presentModalViewController:(id)view_controller
+                         animated:(bool)animated {
+    () = msg![env; this presentViewController:view_controller animated:animated completion:nil];
 }
 - (())dismissMoviePlayerViewControllerAnimated {
     log!("TODO: [(UIViewController*){:?} dismissMoviePlayerViewControllerAnimated]", this); // TODO

@@ -6,9 +6,7 @@
 //! `NSIndexPath`.
 
 use crate::frameworks::foundation::{NSInteger, NSUInteger};
-use crate::objc::{
-    autorelease, id, msg, objc_classes, ClassExports, HostObject, NSZonePtr,
-};
+use crate::objc::{autorelease, id, msg, objc_classes, ClassExports, HostObject, NSZonePtr};
 
 #[derive(Default)]
 struct NSIndexPathHostObject {

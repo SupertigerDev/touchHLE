@@ -16,6 +16,14 @@ use crate::objc::{
 };
 use crate::Environment;
 
+const ITABLAPRO_BUNDLE_IDENTIFIER: &str = "com.upasani.iTablaPro";
+const ITABLAPRO_SCREEN_SAVER_OPTION: &str = "ScreenSaverOption";
+
+fn is_itablapro_screen_saver_option(env: &mut Environment, key: id) -> bool {
+    env.bundle.bundle_identifier() == ITABLAPRO_BUNDLE_IDENTIFIER
+        && to_rust_string(env, key) == ITABLAPRO_SCREEN_SAVER_OPTION
+}
+
 #[derive(Default)]
 pub struct State {
     /// `NSUserDefaults*`
@@ -98,6 +106,11 @@ pub const CLASSES: ClassExports = objc_classes! {
     } else {
         msg![env; dict mutableCopy]
     };
+    if env.bundle.bundle_identifier() == ITABLAPRO_BUNDLE_IDENTIFIER {
+        let key = ns_string::get_static_str(env, ITABLAPRO_SCREEN_SAVER_OPTION);
+        let value: id = msg_class![env; NSNumber numberWithInteger:0];
+        () = msg![env; dict setObject:value forKey:key];
+    }
     env.objc.borrow_mut::<NSUserDefaultsHostObject>(this).app_domain_dict = dict;
 
     this
@@ -140,11 +153,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     // is overridden for NSUserDefaults.
     // Behaviour was confirmed on macOS.
     // Only app domain gets affected here (this part wasn't verified).
-    let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
-    msg![env; dict setValue:val forKey:key]
+    msg![env; this setObject:val forKey:key]
 }
 
 - (id)objectForKey:(id)key { // NSString*
+    if is_itablapro_screen_saver_option(env, key) {
+        msg_class![env; NSNumber numberWithInteger:0]
+    } else {
     // TODO: check if order of searching is correct
     let app_domain_dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
     let res: id = msg![env; app_domain_dict objectForKey:key];
@@ -158,6 +173,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let registration_domain_dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).registration_domain_dict;
     msg![env; registration_domain_dict objectForKey:key]
+    }
 }
 
 - (())registerDefaults:(id)registration_dictionary {
@@ -178,13 +194,28 @@ pub const CLASSES: ClassExports = objc_classes! {
          forKey:(id)key { // NSString*
     // Only app domain gets affected!
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
-    msg![env; dict setObject:object forKey:key]
+    let object = if is_itablapro_screen_saver_option(env, key) {
+        msg_class![env; NSNumber numberWithInteger:0]
+    } else {
+        object
+    };
+    // Unlike NSMutableDictionary, setting nil removes the key.
+    if object == nil {
+        msg![env; dict removeObjectForKey:key]
+    } else {
+        msg![env; dict setObject:object forKey:key]
+    }
 }
 
 - (())removeObjectForKey:(id)key {
     // Only app domain gets affected!
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
-    msg![env; dict removeObjectForKey:key]
+    if is_itablapro_screen_saver_option(env, key) {
+        let value: id = msg_class![env; NSNumber numberWithInteger:0];
+        msg![env; dict setObject:value forKey:key]
+    } else {
+        msg![env; dict removeObjectForKey:key]
+    }
 }
 
 - (id)dataForKey:(id)key {

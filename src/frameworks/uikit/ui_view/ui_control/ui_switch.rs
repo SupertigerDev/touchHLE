@@ -323,6 +323,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setOn:(bool)on animated:(bool)_animated {
     // TODO: support animation
+    log!(
+        "UISwitch {:?} setOn:{} (previous {})",
+        this,
+        on,
+        env.objc.borrow::<UISwitchHostObject>(this).is_on
+    );
     env.objc.borrow_mut::<UISwitchHostObject>(this).is_on = on;
     update(env, this);
 }

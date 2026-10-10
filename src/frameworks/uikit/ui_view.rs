@@ -203,6 +203,20 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg_class![env; CATransaction setAnimationTimingFunction:timing_function];
 }
 
++ (())setAnimationTransition:(NSInteger)transition
+                     forView:(id)view
+                       cache:(bool)cache {
+    log_dbg!(
+        "[UIView setAnimationTransition:{:?} forView:{:?} cache:{:?}]",
+        transition,
+        view,
+        cache
+    );
+    if transition != 0 {
+        log!("TODO: UIView transition animations are not rendered");
+    }
+}
+
 + (())setAnimationRepeatAutoreverses:(bool)repeat_autoreverses {
     log_dbg!("[UIView setAnimationRepeatAutoreverses:{:?}]", repeat_autoreverses);
     let value: id = msg_class![env; NSNumber numberWithBool:repeat_autoreverses];

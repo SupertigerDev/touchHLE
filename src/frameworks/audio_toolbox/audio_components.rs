@@ -63,6 +63,7 @@ pub struct AudioComponentInstanceHostObject {
     pub al_source: Option<ALuint>,
     pub is_running_handler: bool,
     pub parameter_values: HashMap<(u32, u32, u32), f32>,
+    pub graph_input_sample_phases: HashMap<(AudioComponentInstance, u32), f64>,
 }
 
 pub(super) fn create_audio_component_instance(env: &mut Environment) -> AudioComponentInstance {
@@ -112,6 +113,7 @@ impl Default for AudioComponentInstanceHostObject {
             al_source: None,
             is_running_handler: false,
             parameter_values: HashMap::new(),
+            graph_input_sample_phases: HashMap::new(),
         }
     }
 }
