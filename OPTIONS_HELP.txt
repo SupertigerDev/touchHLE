@@ -115,8 +115,8 @@ Game controller options:
         DPadUp, DPadRight, DPadDown, Start, LeftShoulder or Xbox-like
         A, B, X or Y), the X co-ordinate and the Y co-ordinate.
         The co-ordinates are floating-point (decimal) numbers. 0,0 is the
-        top-left corner. The bottom-right corner is 320,480 if the app is in
-        portrait, and 480,320 if the app is in landscape.
+        top-left corner. The bottom-right corner is 320,568 if the app is in
+        portrait, and 568,320 if the app is in landscape.
 
         For example, --button-to-touch=A,470,310 will make the A button simulate
         tapping in the bottom-right corner of the screen, for a landscape game.
@@ -133,7 +133,7 @@ Game controller options:
 
         This is four parts separated by commas: x,y,w,h. The co-ordinates
         are floating-point (decimal) numbers. 0,0 is the top-left corner. The
-        bottom-right corner is 320,480 if the app is in portrait, and 480,320
+        bottom-right corner is 320,568 if the app is in portrait, and 568,320
         if the app is in landscape.
 
         For example, --dpad-to-touch=10,10,50,50 will simulate an 8-directional
@@ -154,7 +154,7 @@ Game controller options:
 
         This is four parts separated by commas: x,y,w,h. The co-ordinates
         are floating-point (decimal) numbers. 0,0 is the top-left corner. The
-        bottom-right corner is 320,480 if the app is in portrait, and 480,320
+        bottom-right corner is 320,568 if the app is in portrait, and 568,320
         if the app is in landscape.
 
         For example, --stick-to-touch=10,10,100,100 will map the left analog
