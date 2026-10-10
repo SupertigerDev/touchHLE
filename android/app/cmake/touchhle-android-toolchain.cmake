@@ -1,0 +1,10 @@
+set(CMAKE_SYSTEM_NAME Android)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+set(ANDROID_ABI arm64-v8a CACHE STRING "")
+set(ANDROID_PLATFORM android-21 CACHE STRING "")
+set(ANDROID_NDK "$ENV{SDL2_NDK_HOME}" CACHE PATH "" FORCE)
+set(CMAKE_ANDROID_NDK "$ENV{SDL2_NDK_HOME}" CACHE PATH "" FORCE)
+
+include("$ENV{SDL2_NDK_HOME}/build/cmake/android.toolchain.cmake")
+
+set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/touchhle-android-project.cmake")

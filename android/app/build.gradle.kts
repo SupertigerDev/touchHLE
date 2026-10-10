@@ -38,7 +38,7 @@ fun join(prefix: String, separator: String, branding: String): String {
 }
 
 android {
-    ndkVersion = "25.2.9519653"
+    ndkVersion = "28.2.13676358"
     compileSdk = 31
     buildFeatures {
         buildConfig = true
@@ -111,6 +111,23 @@ android {
         }
     }
 
+    // On checkouts without symlink support (e.g. Windows), the asset symlinks
+    // are plain text files, so stage real copies of the directories.
+    val assetsDir = file("src/main/assets")
+    if (assetsDir.resolve("touchHLE_dylibs").isFile) {
+        val stagedAssets = layout.buildDirectory.dir("staged-assets")
+        val stageAssets = tasks.register<Copy>("stageAssets") {
+            from(assetsDir) { exclude("touchHLE_dylibs", "touchHLE_fonts") }
+            from("${rootDir.parentFile}/touchHLE_dylibs") { into("touchHLE_dylibs") }
+            from("${rootDir.parentFile}/touchHLE_fonts") { into("touchHLE_fonts") }
+            into(stagedAssets)
+        }
+        sourceSets.getByName("main").assets.setSrcDirs(listOf(stagedAssets))
+        tasks.configureEach {
+            if (name.startsWith("merge") && name.endsWith("Assets")) dependsOn(stageAssets)
+        }
+    }
+
     if (!project.hasProperty("EXCLUDE_NATIVE_LIBS")) {
         sourceSets {
             getByName("main") {
@@ -138,6 +155,8 @@ cargoNdk {
     extraCargoEnv = mapOf(
         "ANDROID_NDK" to android.ndkDirectory.toString(),
         "ANDROID_NDK_HOME" to android.ndkDirectory.toString(),
+        "SDL2_NDK_HOME" to android.sdkDirectory.toPath().resolve("ndk/25.2.9519653").toString(),
+        "SDL2_TOOLCHAIN" to projectDir.toPath().resolve("cmake/touchhle-android-toolchain.cmake").toString(),
     )
 
     if (DefaultNativePlatform.host().operatingSystem.isWindows) {
