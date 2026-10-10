@@ -203,6 +203,9 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
         bundle_path
     };
 
+    #[cfg(target_os = "android")]
+    sdl2::hint::set("TOUCHHLE_IPA_RUNNING", "1");
+
     // When PowerShell does tab-completion on a directory, for some reason it
     // expands it to `'..\My Bundle.app\'` and that trailing \ seems to
     // get interpreted as escaping a double quotation mark?

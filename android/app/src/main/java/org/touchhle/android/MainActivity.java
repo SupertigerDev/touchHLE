@@ -43,7 +43,9 @@ public class MainActivity extends SDLActivity {
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
-        finish();
+        if (SDLActivity.nativeGetHintBoolean("TOUCHHLE_IPA_RUNNING", false)) {
+            finish();
+        }
     }
 
     @Override
