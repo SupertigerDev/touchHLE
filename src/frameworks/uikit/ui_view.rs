@@ -474,6 +474,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     // Layout is performed for the whole view hierarchy before each render.
 }
 
+- (())layoutIfNeeded {
+    () = msg![env; this layoutSubviews];
+    let subviews = env.objc.borrow::<UIViewHostObject>(this).subviews.clone();
+    for subview in subviews {
+        () = msg![env; subview layoutIfNeeded];
+    }
+}
+
 - (id)superview {
     env.objc.borrow::<UIViewHostObject>(this).superview
 }

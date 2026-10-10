@@ -12,7 +12,9 @@ use crate::frameworks::core_graphics::cg_bitmap_context::CGBitmapContextDrawer;
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string::to_rust_string;
 use crate::frameworks::foundation::NSInteger;
-use crate::objc::{autorelease, id, msg, objc_classes, ClassExports, HostObject};
+use crate::objc::{
+    autorelease, id, msg, objc_classes, retain, ClassExports, HostObject, NSZonePtr,
+};
 use crate::Environment;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -161,6 +163,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new)
 }
 
+- (id)copyWithZone:(NSZonePtr)_zone {
+    retain(env, this)
+}
+
 - (CGFloat)ascender {
     let host_object = env.objc.borrow::<UIFontHostObject>(this);
     let font = env.framework_state.uikit.ui_font.get_font_by_kind(host_object.kind);
@@ -212,7 +218,8 @@ fn get_font<'a>(state: &'a mut State, kind: FontKind, text: &str) -> &'a Font {
     // should be used instead.
     for c in text.chars() {
         let c = c as u32;
-        if (0x3000..=0x30FF).contains(&c) || // JA punctuation, kana
+        if c == 0x266D || // musical flat sign
+           (0x3000..=0x30FF).contains(&c) || // JA punctuation, kana
            (0xFF00..=0xFFEF).contains(&c) || // full-width/half-width chars
            (0x4e00..=0x9FA0).contains(&c) || // various kanji
            (0x3400..=0x4DBF).contains(&c) { // more kanji

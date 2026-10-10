@@ -11,7 +11,7 @@ use crate::frameworks::core_foundation::time::CFTimeInterval;
 use crate::frameworks::foundation::ns_string::{get_static_str, to_rust_string};
 use crate::objc::{
     autorelease, id, msg, nil, objc_classes, release, retain, todo_objc_setter, ClassExports,
-    HostObject, NSZonePtr,
+    HostObject, NSZonePtr, ObjC,
 };
 use crate::Environment;
 use crate::{impl_HostObject_with_superclass, msg_class, msg_super};
@@ -106,6 +106,13 @@ struct CABasicAnimationHostObject {
 }
 impl_HostObject_with_superclass!(CABasicAnimationHostObject);
 
+#[derive(Default)]
+struct CAAnimationGroupHostObject {
+    superclass: CAAnimationHostObject,
+    animations: id, // NSArray<CAAnimation*>*
+}
+impl_HostObject_with_superclass!(CAAnimationGroupHostObject);
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -149,8 +156,29 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())setTimingFunction:(id)timingFunction { // CAMediaTimingFunction*
     log_dbg!("[(CAAnimation*){:?} setTimingFunction:{:?}]", this, timingFunction);
-    env.objc.borrow_mut::<CAAnimationHostObject>(this).timing_function = timingFunction;
+    if timingFunction != nil {
+        let class = ObjC::read_isa(timingFunction, &env.mem);
+        let timing_function_class = env
+            .objc
+            .get_known_class("CAMediaTimingFunction", &mut env.mem);
+        if class == nil || !env.objc.class_is_subclass_of(class, timing_function_class) {
+            log!(
+                "Ignoring invalid CAAnimation timing function {:?} (class {:?})",
+                timingFunction,
+                class
+            );
+            return;
+        }
+    }
+
+    let old_timing_function = {
+        let animation = env.objc.borrow_mut::<CAAnimationHostObject>(this);
+        std::mem::replace(&mut animation.timing_function, timingFunction)
+    };
     retain(env, timingFunction);
+    if old_timing_function != timingFunction {
+        release(env, old_timing_function);
+    }
 }
 - (id)timingFunction {
     env.objc.borrow::<CAAnimationHostObject>(this).timing_function
@@ -216,6 +244,43 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     env.objc.dealloc_object(this, &mut env.mem)
+}
+
+@end
+
+
+@implementation CAAnimationGroup: CAAnimation
+
++ (id)allocWithZone:(NSZonePtr)_zone {
+    let host_object = Box::<CAAnimationGroupHostObject>::default();
+    env.objc.alloc_object(this, host_object, &mut env.mem)
+}
+
+- (id)animations {
+    env.objc.borrow::<CAAnimationGroupHostObject>(this).animations
+}
+- (())setAnimations:(id)animations {
+    let old_animations = env
+        .objc
+        .borrow::<CAAnimationGroupHostObject>(this)
+        .animations;
+    if old_animations == animations {
+        return;
+    }
+    retain(env, animations);
+    release(env, old_animations);
+    env.objc
+        .borrow_mut::<CAAnimationGroupHostObject>(this)
+        .animations = animations;
+}
+
+- (())dealloc {
+    let animations = env
+        .objc
+        .borrow::<CAAnimationGroupHostObject>(this)
+        .animations;
+    release(env, animations);
+    msg_super![env; this dealloc]
 }
 
 @end

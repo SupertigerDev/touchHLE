@@ -27,7 +27,7 @@ use crate::frameworks::core_animation::{ca_layer::CALayerHostObject, CACurrentMe
 use crate::frameworks::core_foundation::time::CFTimeInterval;
 use crate::frameworks::core_graphics::cg_color::CGColorHostObject;
 use crate::frameworks::foundation::ns_string::{from_rust_string, to_rust_string};
-use crate::objc::{id, msg, nil, release, retain};
+use crate::objc::{id, msg, nil, release, retain, ObjC};
 use crate::Environment;
 
 #[derive(Default)]
@@ -61,6 +61,18 @@ impl State {
             Iterator::chain(named_animations.iter(), anonymous_animations.iter())
         {
             let animation = *animation;
+            let animation_class = msg![env; animation class];
+            let animation_group_class = env.objc.get_known_class("CAAnimationGroup", &mut env.mem);
+            if env
+                .objc
+                .class_is_subclass_of(animation_class, animation_group_class)
+            {
+                log_dbg!(
+                    "Ignoring grouped animation {:?} during presentation-layer rendering",
+                    animation
+                );
+                continue;
+            }
 
             let fill_mode: CAMediaTimingFillMode = msg![env; animation fillMode];
             let fill_mode = to_rust_string(env, fill_mode);
@@ -124,6 +136,23 @@ impl State {
             }
 
             let timing_function: id = msg![env; animation timingFunction];
+            let timing_function_class = env
+                .objc
+                .get_known_class("CAMediaTimingFunction", &mut env.mem);
+            let is_valid_timing_function = if timing_function == nil {
+                false
+            } else {
+                let class = ObjC::read_isa(timing_function, &env.mem);
+                class != nil && env.objc.class_is_subclass_of(class, timing_function_class)
+            };
+            if !is_valid_timing_function {
+                log!(
+                    "Ignoring animation {:?}: timingFunction {:?} is not a CAMediaTimingFunction",
+                    animation,
+                    timing_function
+                );
+                continue;
+            }
             let interpolation_amount: f32 = msg![env; timing_function _solveForInput: progress];
 
             if current_repeat >= effective_repeat_count {

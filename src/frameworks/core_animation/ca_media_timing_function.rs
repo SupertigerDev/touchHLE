@@ -99,21 +99,73 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 + (id)functionWithName:(CAMediaTimingFunctionName)name {
     let name_string = to_rust_string(env, name);
-    let object: Option<id> = env.framework_state.core_animation.ca_media_timing_function.named_functions.get(name_string.as_ref()).copied();
+    let object: Option<id> = env
+        .framework_state
+        .core_animation
+        .ca_media_timing_function
+        .named_functions
+        .get(name_string.as_ref())
+        .copied();
     let object = if let Some(object) = object {
         object
     } else {
-        let (name_str, object) = match &*name_string {
-            kCAMediaTimingFunctionDefault => (kCAMediaTimingFunctionDefault, msg_class![env; CAMediaTimingFunction functionWithControlPoints: 0.25f32 : 0.10f32 : 0.25f32 : 1.00f32]),
-            kCAMediaTimingFunctionEaseIn => (kCAMediaTimingFunctionEaseIn, msg_class![env; CAMediaTimingFunction functionWithControlPoints: 0.42f32 : 0.0f32 : 1.0f32 : 1.0f32]),
-            kCAMediaTimingFunctionEaseInEaseOut => (kCAMediaTimingFunctionEaseInEaseOut, msg_class![env; CAMediaTimingFunction functionWithControlPoints: 0.42f32 : 0.0f32 : 0.58f32 : 1.0f32]),
-            kCAMediaTimingFunctionEaseOut => (kCAMediaTimingFunctionEaseOut, msg_class![env; CAMediaTimingFunction functionWithControlPoints: 0.0f32 : 0.0f32 : 0.58f32 : 1.0f32]),
-            kCAMediaTimingFunctionLinear => (kCAMediaTimingFunctionLinear, msg_class![env; CAMediaTimingFunction functionWithControlPoints: 0.0f32 : 0.0f32 : 1.0f32 : 1.0f32]),
+        let (name_str, c1x, c1y, c2x, c2y) = match &*name_string {
+            kCAMediaTimingFunctionDefault => (
+                kCAMediaTimingFunctionDefault,
+                0.25f32,
+                0.10f32,
+                0.25f32,
+                1.00f32,
+            ),
+            kCAMediaTimingFunctionEaseIn => {
+                (
+                    kCAMediaTimingFunctionEaseIn,
+                    0.42f32,
+                    0.0f32,
+                    1.0f32,
+                    1.0f32,
+                )
+            }
+            kCAMediaTimingFunctionEaseInEaseOut => {
+                (
+                    kCAMediaTimingFunctionEaseInEaseOut,
+                    0.42f32,
+                    0.0f32,
+                    0.58f32,
+                    1.0f32,
+                )
+            }
+            kCAMediaTimingFunctionEaseOut => {
+                (
+                    kCAMediaTimingFunctionEaseOut,
+                    0.0f32,
+                    0.0f32,
+                    0.58f32,
+                    1.0f32,
+                )
+            }
+            kCAMediaTimingFunctionLinear => {
+                (
+                    kCAMediaTimingFunctionLinear,
+                    0.0f32,
+                    0.0f32,
+                    1.0f32,
+                    1.0f32,
+                )
+            }
             _ => panic!("Attempted to instance CAMediaTimingFunction with unknown name {name_string}"),
         };
-        env.framework_state.core_animation.ca_media_timing_function.named_functions.insert(name_str, object);
-        retain(env, object)
+        let object: id = msg_class![env; CAMediaTimingFunction alloc];
+        let object: id = msg![env; object initWithControlPoints:c1x :c1y :c2x :c2y];
+        env.framework_state
+            .core_animation
+            .ca_media_timing_function
+            .named_functions
+            .insert(name_str, object);
+        object
     };
+    retain(env, object);
+    let object = autorelease(env, object);
     log_dbg!("[CAMediaTimingFunction functionWithName:{:?} ({:?})] -> {:?}", name, name_string, object);
     object
 }

@@ -27,7 +27,7 @@ use crate::frameworks::foundation::ns_string::{self, get_static_str, to_rust_str
 use crate::mem::{GuestUSize, Ptr};
 use crate::objc::{
     autorelease, id, msg, msg_class, nil, objc_classes, release, retain, todo_objc_setter,
-    ClassExports, HostObject, ObjC,
+    ClassExports, HostObject, NSZonePtr, ObjC,
 };
 use crate::Environment;
 use std::collections::{HashMap, HashSet};
@@ -195,6 +195,39 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     env.objc.dealloc_object(this, &mut env.mem)
+}
+
+- (id)copyWithZone:(NSZonePtr)_zone {
+    let sublayers = env
+        .objc
+        .borrow::<CALayerHostObject>(this)
+        .sublayers
+        .clone();
+    let mut copy = env.objc.borrow::<CALayerHostObject>(this).clone();
+    copy.delegate = nil;
+    copy.sublayers.clear();
+    copy.superlayer = nil;
+    copy.presented_pixels = None;
+    copy.cg_context = None;
+    copy.gles_texture = None;
+    copy.gles_texture_is_up_to_date = false;
+    copy.animations.clear();
+    copy.anonymous_animations.clear();
+
+    let layer_class: id = msg![env; this class];
+    let new_layer: id = msg![env; layer_class alloc];
+    *env.objc.borrow_mut::<CALayerHostObject>(new_layer) = copy.clone();
+    retain(env, copy.contents);
+    retain(env, copy.drawable_properties);
+    retain(env, copy.mask);
+
+    for sublayer in sublayers {
+        let sublayer_copy: id = msg![env; sublayer copy];
+        () = msg![env; new_layer addSublayer:sublayer_copy];
+        release(env, sublayer_copy);
+    }
+
+    new_layer
 }
 
 - (id)delegate {

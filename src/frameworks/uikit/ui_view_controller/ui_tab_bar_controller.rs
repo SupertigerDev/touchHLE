@@ -342,6 +342,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         };
         let button: id = msg_class![env; UIButton alloc];
         let button: id = msg![env; button initWithFrame:frame];
+        () = msg![env; button _touchHLE_setTabBarButton:true];
         let normal_color: id = msg_class![env; UIColor lightGrayColor];
         () = msg![env; button setTitleColor:normal_color forState:UIControlStateNormal];
         let selected_color: id = msg_class![env; UIColor whiteColor];
@@ -397,7 +398,28 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())_touchHLE_selectTab:(id)button {
     let index: NSInteger = msg![env; button tag];
-    let item = env.objc.borrow::<UITabBarHostObject>(this).items[index as usize];
+    let items = env.objc.borrow::<UITabBarHostObject>(this).items.clone();
+    let item = items[index as usize];
+
+    let mixer_title = get_static_str(env, "Mixer");
+    let controls_title = get_static_str(env, "Controls");
+    let has_mixer_and_controls = items.iter().any(|&item| {
+        let title: id = msg![env; item title];
+        title != nil && msg![env; title isEqualToString:mixer_title]
+    }) && items.iter().any(|&item| {
+        let title: id = msg![env; item title];
+        title != nil && msg![env; title isEqualToString:controls_title]
+    });
+    if has_mixer_and_controls {
+        let title: id = msg![env; item title];
+        let is_mixer_or_controls = title != nil
+            && (msg![env; title isEqualToString:mixer_title]
+                || msg![env; title isEqualToString:controls_title]);
+        if !is_mixer_or_controls {
+            return;
+        }
+    }
+
     () = msg![env; this setSelectedItem:item];
     let delegate = env.objc.borrow::<UITabBarHostObject>(this).delegate;
     if delegate != nil {

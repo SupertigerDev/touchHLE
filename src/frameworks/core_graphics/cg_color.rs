@@ -14,7 +14,7 @@ use crate::frameworks::core_graphics::cg_color_space::{
 };
 use crate::frameworks::core_graphics::CGFloat;
 use crate::mem::MutPtr;
-use crate::objc::{objc_classes, ClassExports, HostObject, ObjC};
+use crate::objc::{id, objc_classes, retain, ClassExports, HostObject, NSZonePtr, ObjC};
 use crate::Environment;
 
 pub const CLASSES: ClassExports = objc_classes! {
@@ -25,6 +25,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 // those are just Objective-C types, so we need a class for it, but its name is
 // not visible anywhere.
 @implementation _touchHLE_CGColor: NSObject
+
+- (id)copyWithZone:(NSZonePtr)_zone {
+    retain(env, this)
+}
+
 @end
 
 };

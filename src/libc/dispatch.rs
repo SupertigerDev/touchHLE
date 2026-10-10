@@ -211,10 +211,37 @@ fn dispatch_get_global_queue(env: &mut Environment, identifier: i32, _flags: u32
 }
 
 fn dispatch_async(env: &mut Environment, _queue: id, block: ConstVoidPtr) {
+    let block = copy_block(env, block.cast_mut().cast());
     let invoke = env.mem.read(block.cast::<BlockLiteral>()).invoke;
     assert!(!invoke.to_ptr().is_null());
     log!("TODO: dispatch_async executes blocks synchronously");
-    () = invoke.call_from_host(env, (block,));
+    () = invoke.call_from_host(env, (block.cast_const().cast::<std::ffi::c_void>(),));
+    release_block(env, block);
+}
+
+fn dispatch_time(env: &mut Environment, when: u64, delta: i64) -> u64 {
+    if when == u64::MAX {
+        return u64::MAX;
+    }
+    let base = if when == 0 {
+        env.startup_time.elapsed().as_nanos() as u64
+    } else {
+        when
+    };
+    if delta >= 0 {
+        base.saturating_add(delta as u64)
+    } else {
+        base.saturating_sub(delta.unsigned_abs())
+    }
+}
+
+fn dispatch_after(env: &mut Environment, _when: u64, _queue: id, block: ConstVoidPtr) {
+    let block = copy_block(env, block.cast_mut().cast());
+    let invoke = env.mem.read(block.cast::<BlockLiteral>()).invoke;
+    assert!(!invoke.to_ptr().is_null());
+    log!("TODO: dispatch_after executes blocks synchronously");
+    () = invoke.call_from_host(env, (block.cast_const().cast::<std::ffi::c_void>(),));
+    release_block(env, block);
 }
 
 pub const CONSTANTS: ConstantExports = &[
@@ -238,6 +265,8 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(dispatch_get_main_queue()),
     export_c_func!(dispatch_get_global_queue(_, _)),
     export_c_func!(dispatch_async(_, _)),
+    export_c_func!(dispatch_time(_, _)),
+    export_c_func!(dispatch_after(_, _, _)),
     export_c_func!(_Block_copy(_)),
     export_c_func!(_Block_release(_)),
 ];

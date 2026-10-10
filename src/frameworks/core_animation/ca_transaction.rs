@@ -6,10 +6,13 @@
 //! `CAAnimation` and its subclasses
 use std::collections::HashMap;
 
+use crate::abi::CallFromHost;
 use crate::dyld::{ConstantExports, HostConstant};
 use crate::frameworks::core_animation::ca_media_timing_function::kCAMediaTimingFunctionDefault;
 use crate::frameworks::core_foundation::time::CFTimeInterval;
 use crate::frameworks::foundation::ns_string::{get_static_str, to_rust_string};
+use crate::libc::dispatch::{copy_block, release_block, BlockLiteral};
+use crate::mem::ConstVoidPtr;
 use crate::objc::{id, nil, objc_classes, release, retain, ClassExports};
 use crate::Environment;
 use crate::{msg, msg_class};
@@ -93,18 +96,21 @@ pub struct Transaction {
     animation_timing_function: id, // CAMediaTimingFunction*
     data: HashMap<String, id>,
     animations: Vec<(id, id)>, // CALayer*, CAAnimation*
+    completion_block: id,
 }
 impl Transaction {
     fn new(env: &mut Environment) -> Self {
         let animation_timing_function_name = get_static_str(env, kCAMediaTimingFunctionDefault);
         let animation_timing_function =
             msg_class![env; CAMediaTimingFunction functionWithName:animation_timing_function_name];
+        retain(env, animation_timing_function);
         Self {
             disable_actions: false,
             animation_duration: 0.25,
             animation_timing_function,
             data: HashMap::default(),
             animations: Vec::default(),
+            completion_block: nil,
         }
     }
 
@@ -117,6 +123,7 @@ impl Transaction {
     }
 
     fn commit(self, env: &mut Environment) {
+        let completion_block = self.completion_block;
         for (layer, animation) in self.animations {
             if !self.disable_actions {
                 () = msg![env; animation setDuration: (self.animation_duration)];
@@ -130,7 +137,32 @@ impl Transaction {
         for (_key, value) in self.data {
             release(env, value);
         }
+
+        if completion_block != nil {
+            let block: ConstVoidPtr = completion_block.cast_const().cast();
+            let invoke = env.mem.read(block.cast::<BlockLiteral>()).invoke;
+            assert!(!invoke.to_ptr().is_null());
+            () = invoke.call_from_host(env, (block,));
+            release_block(env, completion_block);
+        }
+
+        release(env, self.animation_timing_function);
     }
+}
+
+fn set_completion_block(env: &mut Environment, block: id) {
+    let new_block = copy_block(env, block);
+    let old_block = {
+        let transaction = ThreadLocalState::get_current_transaction_mut(env).unwrap();
+        std::mem::replace(&mut transaction.completion_block, new_block)
+    };
+    release_block(env, old_block);
+}
+
+fn get_completion_block(env: &mut Environment) -> id {
+    ThreadLocalState::get_current_transaction(env)
+        .unwrap()
+        .completion_block
 }
 
 pub const kCATransactionAnimationDuration: &str = "animationDuration";
@@ -182,7 +214,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             release(env, old_value);
         },
         kCATransactionCompletionBlock => {
-            unimplemented!();
+            set_completion_block(env, value);
         },
         _ => {
             let transaction = ThreadLocalState::get_current_transaction_mut(env).unwrap();
@@ -207,7 +239,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             ThreadLocalState::get_current_transaction(env).unwrap().animation_timing_function
         },
         kCATransactionCompletionBlock => {
-            unimplemented!()
+            get_completion_block(env)
         },
         _ => {
             ThreadLocalState::get_current_transaction(env).unwrap().data.get(&*key_string).cloned().unwrap_or(nil)
@@ -256,6 +288,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (())setAnimationTimingFunction:(id)animation_timing_function { // CAMediaTimingFunction *
     let key = get_static_str(env, kCATransactionAnimationTimingFunction);
     msg![env; this setValue: animation_timing_function forKey: key]
+}
++ (())setCompletionBlock:(id)completion_block {
+    set_completion_block(env, completion_block);
+}
++ (id)completionBlock {
+    get_completion_block(env)
 }
 @end
 

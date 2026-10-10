@@ -83,6 +83,7 @@ impl State {
 
 struct UIImageHostObject {
     cg_image: CGImageRef,
+    resource_name: Option<String>,
 }
 impl HostObject for UIImageHostObject {}
 
@@ -93,7 +94,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 @implementation UIImage: NSObject
 
 + (id)allocWithZone:(NSZonePtr)_zone {
-    let host_object = Box::new(UIImageHostObject { cg_image: nil });
+    let host_object = Box::new(UIImageHostObject {
+        cg_image: nil,
+        resource_name: None,
+    });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
 
@@ -134,7 +138,11 @@ pub const CLASSES: ClassExports = objc_classes! {
         retain(env, img);
         State::get_mut(env).cached_images.insert(name_str.clone(), img);
     }
-    *State::get(env).cached_images.get(&name_str).unwrap()
+    let image = *State::get(env).cached_images.get(&name_str).unwrap();
+    env.objc
+        .borrow_mut::<UIImageHostObject>(image)
+        .resource_name = Some(name_str);
+    image
 }
 
 + (id)imageWithContentsOfFile:(id)path { // NSString*
@@ -150,10 +158,18 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())dealloc {
-    let &UIImageHostObject { cg_image } = env.objc.borrow(this);
+    let &UIImageHostObject { cg_image, .. } = env.objc.borrow(this);
     CGImageRelease(env, cg_image);
 
     env.objc.dealloc_object(this, &mut env.mem)
+}
+
+- (bool)_touchHLE_isInfoIcon {
+    env.objc
+        .borrow::<UIImageHostObject>(this)
+        .resource_name
+        .as_deref()
+        .is_some_and(|name| name.to_ascii_lowercase().contains("info"))
 }
 
 - (id)initWithCGImage:(CGImageRef)cg_image {

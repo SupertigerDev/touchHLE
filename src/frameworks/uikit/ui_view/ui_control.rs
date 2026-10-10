@@ -87,6 +87,18 @@ fn send_actions(env: &mut Environment, this: id, event: id, control_event: UICon
         event,
     );
 
+    let ignore_actions_selector = env
+        .objc
+        .register_host_selector("_touchHLE_shouldIgnoreActions".to_string(), &mut env.mem);
+    let responds: bool = msg![env; this respondsToSelector:ignore_actions_selector];
+    if responds {
+        let should_ignore: bool = msg![env; this _touchHLE_shouldIgnoreActions];
+        if should_ignore {
+            log_dbg!("Ignoring actions for info-icon button {:?}", this);
+            return;
+        }
+    }
+
     let UIControlHostObject { action_targets, .. } = env.objc.borrow(this);
     let action_targets: Vec<_> = action_targets
         .iter()

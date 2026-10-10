@@ -408,17 +408,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)initWithArray:(id)array { // NSArray*
-    let mut objects = Vec::new();
-    let enumerator: id = msg![env; array objectEnumerator];
-    loop {
-        let next: id = msg![env; enumerator nextObject];
-        if next == nil {
-            break;
-        }
-        objects.push(next);
-        retain(env, next);
-    }
-    env.objc.borrow_mut::<ArrayHostObject>(this).array = objects;
+    init_with_array_inner(env, this, array, false);
+    this
+}
+- (id)initWithArray:(id)array copyItems:(bool)copy_items {
+    init_with_array_inner(env, this, array, copy_items);
     this
 }
 
@@ -556,17 +550,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)initWithArray:(id)array { // NSArray*
-    let mut objects = Vec::new();
-    let enumerator: id = msg![env; array objectEnumerator];
-    loop {
-        let next: id = msg![env; enumerator nextObject];
-        if next == nil {
-            break;
-        }
-        objects.push(next);
-        retain(env, next);
-    }
-    env.objc.borrow_mut::<ArrayHostObject>(this).array = objects;
+    init_with_array_inner(env, this, array, false);
+    this
+}
+- (id)initWithArray:(id)array copyItems:(bool)copy_items {
+    init_with_array_inner(env, this, array, copy_items);
     this
 }
 
@@ -908,6 +896,24 @@ fn init_with_objects_inner(env: &mut Environment, arr: id, first_obj: id, args: 
         }
         retain(env, next_arg);
         objects.push(next_arg);
+    }
+    env.objc.borrow_mut::<ArrayHostObject>(arr).array = objects;
+}
+
+fn init_with_array_inner(env: &mut Environment, arr: id, array: id, copy_items: bool) {
+    let mut objects = Vec::new();
+    let enumerator: id = msg![env; array objectEnumerator];
+    loop {
+        let next: id = msg![env; enumerator nextObject];
+        if next == nil {
+            break;
+        }
+        let object = if copy_items {
+            msg![env; next copy]
+        } else {
+            retain(env, next)
+        };
+        objects.push(object);
     }
     env.objc.borrow_mut::<ArrayHostObject>(arr).array = objects;
 }
