@@ -298,6 +298,10 @@ pub(super) fn set_view(env: &mut Environment, recognizer: id, view: id) {
 }
 
 pub(super) fn handle_touches_ended(env: &mut Environment, view: id, touches: id) {
+    // Touches outside any window (e.g. letterbox area) have no view.
+    if view == nil {
+        return;
+    }
     let recognizers = env
         .objc
         .borrow::<super::ui_view::UIViewHostObject>(view)
@@ -408,6 +412,9 @@ pub(super) fn handle_touches_ended(env: &mut Environment, view: id, touches: id)
 }
 
 pub(super) fn handle_touches_began(env: &mut Environment, view: id, touches: id) {
+    if view == nil {
+        return;
+    }
     let recognizers = env
         .objc
         .borrow::<super::ui_view::UIViewHostObject>(view)
