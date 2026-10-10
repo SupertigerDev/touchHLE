@@ -240,6 +240,8 @@ pub struct Window {
     controller_ctx: sdl2::GameControllerSubsystem,
     controllers: Vec<sdl2::controller::GameController>,
     dpad_state: DpadState,
+    /// When the Android back button was last pressed, for double-press quit.
+    last_back_press: Option<Instant>,
     stick_active: bool,
     _sensor_ctx: sdl2::SensorSubsystem,
     accelerometer: Option<sdl2::sensor::Sensor>,
@@ -390,6 +392,7 @@ impl Window {
             device_orientation,
             controller_ctx,
             controllers: Vec::new(),
+            last_back_press: None,
             dpad_state: DpadState {
                 left: false,
                 right: false,
@@ -550,6 +553,23 @@ impl Window {
 
             self.event_queue.push_back(match event {
                 E::Quit { .. } => Event::Quit,
+                // Android back button
+                E::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::AcBack),
+                    ..
+                } => {
+                    let now = Instant::now();
+                    if self
+                        .last_back_press
+                        .is_some_and(|t| now.duration_since(t) < Duration::from_secs(2))
+                    {
+                        Event::Quit
+                    } else {
+                        self.last_back_press = Some(now);
+                        echo!("Press back again within 2 seconds to quit.");
+                        continue;
+                    }
+                }
                 E::MouseButtonDown {
                     x,
                     y,
