@@ -85,6 +85,11 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
             .count_frame(format_args!("Core Animation compositor"));
     }
 
+    if env.window.as_ref().is_some_and(|w| w.is_in_background()) {
+        // Nothing to draw to; check again shortly.
+        return Some(Instant::now() + Duration::from_millis(50));
+    }
+
     let now = Instant::now();
     let interval = 1.0 / 60.0; // 60Hz
     let new_recomposite_next = if let Some(recomposite_next) = env
@@ -341,6 +346,7 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
 
     // Re-borrow
     let window = env.window.as_mut().unwrap();
+    let in_background = window.is_in_background();
     let mut gles = window.make_internal_gl_ctx_current();
 
     // Clean up some GL state
@@ -354,7 +360,12 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
         gles.LoadIdentity();
         gles.BindBuffer(gles11::ARRAY_BUFFER, 0);
         gles.BindBuffer(gles11::ELEMENT_ARRAY_BUFFER, 0);
-        assert_eq!(gles.GetError(), 0);
+        // The surface can disappear mid-frame when the app is backgrounded.
+        let err = gles.GetError();
+        if err != 0 {
+            assert!(in_background, "GL error {err:#x} while compositing");
+            while gles.GetError() != 0 {}
+        }
     }
 
     // Present our rendered frame (bound to TEXTURE_2D). This copies it to the

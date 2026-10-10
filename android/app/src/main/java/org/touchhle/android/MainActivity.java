@@ -8,6 +8,9 @@
  */
 package org.touchhle.android;
 
+import android.content.Intent;
+import android.os.Build;
+import android.os.Bundle;
 import org.libsdl.app.SDLActivity;
 
 /**
@@ -15,6 +18,28 @@ import org.libsdl.app.SDLActivity;
  */
 
 public class MainActivity extends SDLActivity {
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        Intent service = new Intent(this, KeepAliveService.class);
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(service);
+        } else {
+            startService(service);
+        }
+        if (Build.VERSION.SDK_INT >= 33
+            && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {"android.permission.POST_NOTIFICATIONS"}, 1);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        stopService(new Intent(this, KeepAliveService.class));
+        super.onDestroy();
+    }
+
     @Override
     protected String[] getLibraries() {
         return new String[]{

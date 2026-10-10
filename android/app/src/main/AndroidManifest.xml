@@ -30,6 +30,9 @@
         android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- External mouse input events -->
     <uses-feature
@@ -66,6 +69,14 @@
         <!-- Example of setting SDL hints from AndroidManifest.xml:
         <meta-data android:name="SDL_ENV.SDL_ACCELEROMETER_AS_JOYSTICK" android:value="0"/>
          -->
+
+        <!-- Keep running (and playing audio) while in the background. -->
+        <meta-data android:name="SDL_ENV.SDL_ANDROID_BLOCK_ON_PAUSE" android:value="0"/>
+        <meta-data android:name="SDL_ENV.SDL_ANDROID_BLOCK_ON_PAUSE_PAUSEAUDIO" android:value="0"/>
+
+        <service
+            android:name="org.touchhle.android.KeepAliveService"
+            android:exported="false" />
 
         <activity
             android:name="org.touchhle.android.MainActivity"

@@ -279,6 +279,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let fullscreen_layer = find_fullscreen_eagl_layer(env);
 
+    if env.window.as_ref().is_some_and(|w| w.is_in_background()) {
+        // No surface to present to while backgrounded.
+        if let Some(sleep_for) = sleep_for {
+            env.sleep(sleep_for);
+        }
+        return true;
+    }
+
     // Unclear from documentation if this method requires the context to be
     // current, but it would be weird if it didn't?
     let window = env.window.as_mut().expect("OpenGL ES is not supported in headless mode");

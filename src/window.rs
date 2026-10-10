@@ -221,6 +221,10 @@ pub struct Window {
     /// terminate).
     high_priority_event: Option<Event>,
     enable_event_polling: bool,
+    /// On Android, the app keeps running (e.g. audio) while backgrounded, but
+    /// there is no surface to present to.
+    #[cfg(target_os = "android")]
+    in_background: std::cell::Cell<bool>,
     #[cfg(target_os = "macos")]
     max_height: u32,
     #[cfg(target_os = "macos")]
@@ -372,6 +376,8 @@ impl Window {
             last_polled: Instant::now() - Duration::from_secs(1),
             high_priority_event: None,
             enable_event_polling: true,
+            #[cfg(target_os = "android")]
+            in_background: std::cell::Cell::new(false),
             #[cfg(target_os = "macos")]
             max_height,
             #[cfg(target_os = "macos")]
@@ -712,6 +718,19 @@ impl Window {
                         continue;
                     }
                 }
+                #[cfg(target_os = "android")]
+                E::AppWillEnterBackground { .. } => {
+                    log!("App entered background, continuing to run (audio).");
+                    self.in_background.set(true);
+                    continue;
+                }
+                #[cfg(target_os = "android")]
+                E::AppDidEnterForeground { .. } => {
+                    log!("App returned to foreground.");
+                    self.in_background.set(false);
+                    continue;
+                }
+                #[cfg(not(target_os = "android"))]
                 E::AppWillEnterBackground { .. } => {
                     log!("Received app-will-resign-active event.");
                     assert!(self.high_priority_event.is_none());
@@ -1266,7 +1285,27 @@ impl Window {
     /// Swap front-buffer and back-buffer so the result of OpenGL rendering is
     /// presented.
     pub fn swap_window(&self) {
+        #[cfg(target_os = "android")]
+        if self.in_background.get() {
+            // No surface while backgrounded; pace the loop instead of
+            // spinning.
+            std::thread::sleep(Duration::from_millis(16));
+            return;
+        }
         self.window.gl_swap_window();
+    }
+
+    /// On Android, whether the app is backgrounded (no surface to draw to,
+    /// but the app keeps running so audio can continue).
+    pub fn is_in_background(&self) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            self.in_background.get()
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            false
+        }
     }
 
     /// Consider the emulated device to be rotated to a particular orientation.
