@@ -43,7 +43,7 @@ impl std::fmt::Display for DeviceFamily {
 impl DeviceFamily {
     pub fn portrait_size(&self) -> (u32, u32) {
         match self {
-            DeviceFamily::iPhone => (320, 480),
+            DeviceFamily::iPhone => (320, 568),
             DeviceFamily::iPad => (768, 1024),
         }
     }
