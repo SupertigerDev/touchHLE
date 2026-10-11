@@ -185,7 +185,10 @@ fn init_common(env: &mut Environment, this: id) -> id {
                                                                  green:(122.0f32 / 255.0)
                                                                   blue:(1.0f32)
                                                                  alpha:(1.0f32)];
-    let thumb_color: id = msg_class![env; UIColor whiteColor];
+    let thumb_color: id = msg_class![env; UIColor colorWithRed:(0.25f32)
+                                                         green:(0.25f32)
+                                                          blue:(0.25f32)
+                                                         alpha:(1.0f32)];
     () = msg![env; track setBackgroundColor:track_color];
     () = msg![env; filled_track setBackgroundColor:filled_track_color];
     () = msg![env; thumb setBackgroundColor:thumb_color];

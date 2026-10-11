@@ -300,6 +300,15 @@ impl super::ObjC {
         *refcount
     }
 
+    /// Whether an object has static duration and is therefore not
+    /// reference-counted.
+    pub fn is_static_lifetime(&mut self, object: id) -> bool {
+        let Some(entry) = self.objects.get(&object) else {
+            panic!("No entry found for object {object:?}, it may have already been deallocated");
+        };
+        entry.refcount.is_none()
+    }
+
     /// Increase the refcount of a reference-counted object. Do not call this
     /// directly unless you're implementing `release` on `NSObject`. That method
     /// may be overridden.

@@ -90,11 +90,120 @@ pub(super) struct UIViewHostObject {
     /// Root view controller for a window, if any. Strong reference.
     root_view_controller: id,
     tag: NSInteger,
+    autoresizing_mask: NSUInteger,
+    autoresizes_subviews: bool,
     clears_context_before_drawing: bool,
     user_interaction_enabled: bool,
     multiple_touch_enabled: bool,
 }
 impl HostObject for UIViewHostObject {}
+
+const UIViewAutoresizingFlexibleLeftMargin: NSUInteger = 1 << 0;
+const UIViewAutoresizingFlexibleWidth: NSUInteger = 1 << 1;
+const UIViewAutoresizingFlexibleRightMargin: NSUInteger = 1 << 2;
+const UIViewAutoresizingFlexibleTopMargin: NSUInteger = 1 << 3;
+const UIViewAutoresizingFlexibleHeight: NSUInteger = 1 << 4;
+const UIViewAutoresizingFlexibleBottomMargin: NSUInteger = 1 << 5;
+
+fn resize_axis(
+    origin: f32,
+    size: f32,
+    parent_size_delta: f32,
+    leading_margin: f32,
+    trailing_margin: f32,
+    flexible_leading: bool,
+    flexible_size: bool,
+    flexible_trailing: bool,
+) -> (f32, f32) {
+    let flexible_count =
+        usize::from(flexible_leading) + usize::from(flexible_size) + usize::from(flexible_trailing);
+    if flexible_count == 0 || parent_size_delta == 0.0 {
+        return (origin, size);
+    }
+
+    let weights = [
+        if flexible_leading {
+            leading_margin.max(0.0)
+        } else {
+            0.0
+        },
+        if flexible_size { size.max(0.0) } else { 0.0 },
+        if flexible_trailing {
+            trailing_margin.max(0.0)
+        } else {
+            0.0
+        },
+    ];
+    let total_weight: f32 = weights.iter().sum();
+    let mut changes = [0.0; 3];
+    if total_weight > 0.0 {
+        for (change, weight) in changes.iter_mut().zip(weights) {
+            *change = parent_size_delta * weight / total_weight;
+        }
+    } else {
+        let change = parent_size_delta / flexible_count as f32;
+        changes[0] = if flexible_leading { change } else { 0.0 };
+        changes[1] = if flexible_size { change } else { 0.0 };
+        changes[2] = if flexible_trailing { change } else { 0.0 };
+    }
+
+    (origin + changes[0], (size + changes[1]).max(0.0))
+}
+
+fn autoresized_frame(
+    frame: CGRect,
+    old_parent_bounds: CGRect,
+    new_parent_bounds: CGRect,
+    mask: NSUInteger,
+) -> CGRect {
+    let horizontal_delta = new_parent_bounds.size.width - old_parent_bounds.size.width;
+    let vertical_delta = new_parent_bounds.size.height - old_parent_bounds.size.height;
+    let leading = frame.origin.x - old_parent_bounds.origin.x;
+    let trailing = old_parent_bounds.size.width - leading - frame.size.width;
+    let (x, width) = resize_axis(
+        frame.origin.x,
+        frame.size.width,
+        horizontal_delta,
+        leading,
+        trailing,
+        mask & UIViewAutoresizingFlexibleLeftMargin != 0,
+        mask & UIViewAutoresizingFlexibleWidth != 0,
+        mask & UIViewAutoresizingFlexibleRightMargin != 0,
+    );
+    let top = frame.origin.y - old_parent_bounds.origin.y;
+    let bottom = old_parent_bounds.size.height - top - frame.size.height;
+    let (y, height) = resize_axis(
+        frame.origin.y,
+        frame.size.height,
+        vertical_delta,
+        top,
+        bottom,
+        mask & UIViewAutoresizingFlexibleTopMargin != 0,
+        mask & UIViewAutoresizingFlexibleHeight != 0,
+        mask & UIViewAutoresizingFlexibleBottomMargin != 0,
+    );
+    CGRect {
+        origin: CGPoint { x, y },
+        size: CGSize { width, height },
+    }
+}
+
+fn autoresize_subviews(env: &mut Environment, view: id, old_bounds: CGRect, new_bounds: CGRect) {
+    let host_object = env.objc.borrow::<UIViewHostObject>(view);
+    if !host_object.autoresizes_subviews {
+        return;
+    }
+    let subviews = host_object.subviews.clone();
+
+    for subview in subviews {
+        let frame: CGRect = msg![env; subview frame];
+        let mask: NSUInteger = msg![env; subview autoresizingMask];
+        let new_frame = autoresized_frame(frame, old_bounds, new_bounds, mask);
+        if new_frame != frame {
+            () = msg![env; subview setFrame:new_frame];
+        }
+    }
+}
 impl Default for UIViewHostObject {
     fn default() -> UIViewHostObject {
         // The Default trait is implemented so subclasses will get the same
@@ -107,6 +216,8 @@ impl Default for UIViewHostObject {
             view_controller: nil,
             root_view_controller: nil,
             tag: 0,
+            autoresizing_mask: 0,
+            autoresizes_subviews: true,
             clears_context_before_drawing: true,
             user_interaction_enabled: true,
             multiple_touch_enabled: false,
@@ -389,12 +500,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     let key_ns_string = get_static_str(env, "UIMultipleTouchEnabled");
     let multi_touch_enabled: bool = msg![env; coder decodeBoolForKey:key_ns_string];
 
+    let key_ns_string = get_static_str(env, "UIAutoresizingMask");
+    let autoresizing_mask: NSInteger = msg![env; coder decodeIntegerForKey:key_ns_string];
+
     let key_ns_string = get_static_str(env, "UISubviews");
     let subviews: id = msg![env; coder decodeObjectForKey:key_ns_string];
     let subview_count: NSUInteger = msg![env; subviews count];
 
     log_dbg!(
-        "[(UIView*){:?} initWithCoder:{:?}] => bounds {}, center {}, hidden {}, bg color {:?}, tag {}, opaque {}, multi touch enabled {}, {} subviews",
+        "[(UIView*){:?} initWithCoder:{:?}] => bounds {}, center {}, hidden {}, bg color {:?}, tag {}, opaque {}, multi touch enabled {}, autoresizing mask {}, {} subviews",
         this,
         coder,
         bounds,
@@ -404,6 +518,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         tag,
         opaque,
         multi_touch_enabled,
+        autoresizing_mask as NSUInteger,
         subview_count,
     );
 
@@ -414,6 +529,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg![env; this setBackgroundColor:bg_color];
     () = msg![env; this setTag:tag];
     () = msg![env; this setMultipleTouchEnabled:multi_touch_enabled];
+    () = msg![env; this setAutoresizingMask:(autoresizing_mask as NSUInteger)];
 
     for i in 0..subview_count {
         let subview: id = msg![env; subviews objectAtIndex:i];
@@ -703,6 +819,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         view_controller,
         root_view_controller,
         tag: _,
+        autoresizing_mask: _,
+        autoresizes_subviews: _,
         clears_context_before_drawing: _,
         user_interaction_enabled: _,
         multiple_touch_enabled: _,
@@ -810,7 +928,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setBounds:(CGRect)bounds {
     let layer = env.objc.borrow::<UIViewHostObject>(this).layer;
-    msg![env; layer setBounds:bounds]
+    let old_bounds: CGRect = msg![env; layer bounds];
+    () = msg![env; layer setBounds:bounds];
+    let new_bounds: CGRect = msg![env; layer bounds];
+    autoresize_subviews(env, this, old_bounds, new_bounds);
 }
 - (CGPoint)center {
     // FIXME: what happens if [layer anchorPoint] isn't (0.5, 0.5)?
@@ -827,7 +948,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setFrame:(CGRect)frame {
     let layer = env.objc.borrow::<UIViewHostObject>(this).layer;
-    msg![env; layer setFrame:frame]
+    let old_bounds: CGRect = msg![env; layer bounds];
+    () = msg![env; layer setFrame:frame];
+    let new_bounds: CGRect = msg![env; layer bounds];
+    autoresize_subviews(env, this, old_bounds, new_bounds);
 }
 - (CGAffineTransform)transform {
     let layer = env.objc.borrow::<UIViewHostObject>(this).layer;
@@ -979,10 +1103,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setAutoresizingMask:(NSUInteger)mask {
-    todo_objc_setter!(this, mask);
+    env.objc.borrow_mut::<UIViewHostObject>(this).autoresizing_mask = mask;
+}
+- (NSUInteger)autoresizingMask {
+    env.objc.borrow::<UIViewHostObject>(this).autoresizing_mask
 }
 - (())setAutoresizesSubviews:(bool)enabled {
-    todo_objc_setter!(this, enabled);
+    env.objc.borrow_mut::<UIViewHostObject>(this).autoresizes_subviews = enabled;
+}
+- (bool)autoresizesSubviews {
+    env.objc.borrow::<UIViewHostObject>(this).autoresizes_subviews
 }
 
 - (CGSize)sizeThatFits:(CGSize)size {
