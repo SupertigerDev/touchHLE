@@ -78,6 +78,44 @@ pub fn app_picker(options: Options) -> Result<(PathBuf, Vec<String>), String> {
     show_app_picker_gui(options, apps)
 }
 
+#[cfg(target_os = "android")]
+fn find_latest_imported_ipa() -> Result<PathBuf, String> {
+    let apps_dir = paths::user_data_base_path().join(paths::APPS_DIR);
+    let entries = std::fs::read_dir(&apps_dir)
+        .map_err(|e| format!("Couldn't read {}: {}", apps_dir.display(), e))?;
+    let mut latest: Option<(std::time::SystemTime, PathBuf)> = None;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Couldn't read an app directory entry: {}", e))?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+            continue;
+        };
+        if !name.starts_with("touchHLE_import_")
+            || !path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("ipa"))
+        {
+            continue;
+        }
+
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .map_err(|e| format!("Couldn't inspect {}: {}", path.display(), e))?;
+        if latest
+            .as_ref()
+            .is_none_or(|(latest_modified, _)| modified > *latest_modified)
+        {
+            latest = Some((modified, path));
+        }
+    }
+
+    latest
+        .map(|(_, path)| path)
+        .ok_or_else(|| format!("No imported IPA was found in {}", apps_dir.display()))
+}
+
 fn enumerate_apps(apps_dir: &Path) -> Result<Vec<AppInfo>, std::io::Error> {
     let mut apps = Vec::new();
     for app in std::fs::read_dir(apps_dir)? {
@@ -242,6 +280,17 @@ const CLASSES: ClassExports = objc_classes! {
     // Assert (see above).
     let _ = env.objc.borrow_mut::<AppPickerDelegateHostObject>(this);
 
+    #[cfg(target_os = "android")]
+    {
+        // Route through the Android activity so it can return a selected IPA.
+        let url_res = crate::window::open_url(env, "touchhle://pick-ipa");
+        if let Err(e) = url_res {
+            echo!("Couldn't open IPA picker: {}", e);
+        }
+        return;
+    }
+
+    #[cfg(not(target_os = "android"))]
     match paths::url_for_opening_user_data_dir() {
         Ok(url) => {
             // Our `openURL:` implementation is bypassed because it doesn't
@@ -585,6 +634,16 @@ fn app_picker_inner(
     // process exits.
     let app_path = loop {
         run_run_loop_single_iteration(env, main_run_loop);
+        #[cfg(target_os = "android")]
+        if crate::take_android_ipa_import_completed() {
+            match find_latest_imported_ipa() {
+                Ok(path) => {
+                    echo!("Imported and picked: {}", path.display());
+                    break path;
+                }
+                Err(e) => echo!("Couldn't find imported IPA: {}", e),
+            }
+        }
         let host_obj = env.objc.borrow_mut::<AppPickerDelegateHostObject>(delegate);
         let icon_tapped = std::mem::take(&mut host_obj.icon_tapped);
         if icon_tapped != nil {

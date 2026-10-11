@@ -1309,10 +1309,9 @@ impl Environment {
                 }
             };
 
-            self.window
-                .as_mut()
-                .unwrap()
-                .poll_for_events(self.options.as_ref());
+            let window = self.window.as_mut().unwrap();
+            window.on_main_stack = true;
+            window.poll_for_events(self.options.as_ref());
             assert!(self.threads.len() == 1);
             match self.threads[0].blocked_by {
                 ThreadBlock::NotBlocked => {}

@@ -62,6 +62,24 @@ use std::path::PathBuf;
 
 pub use touchHLE_version::*;
 
+#[cfg(target_os = "android")]
+static ANDROID_IPA_IMPORT_COMPLETED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "android")]
+pub(crate) fn take_android_ipa_import_completed() -> bool {
+    ANDROID_IPA_IMPORT_COMPLETED.swap(false, std::sync::atomic::Ordering::AcqRel)
+}
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_org_touchhle_android_MainActivity_nativeOnIpaImportCompleted(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+) {
+    ANDROID_IPA_IMPORT_COMPLETED.store(true, std::sync::atomic::Ordering::Release);
+}
+
 /// This is the true entry point on Android (SDLActivity calls it after
 /// initialization). On other platforms the true entry point is in src/bin.rs.
 #[cfg(target_os = "android")]
