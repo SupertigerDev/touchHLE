@@ -591,13 +591,13 @@ pub const CLASSES: ClassExports = objc_classes! {
             let old_index: NSInteger = msg![env; this selectedSegmentIndex];
             let new_index = index as NSInteger;
             if old_index != new_index {
-                set_selected_segment(env, this, new_index);
+                () = msg![env; this setSelectedSegmentIndex:new_index];
                 send_actions(env, this, event, UIControlEventValueChanged);
             }
         }
     }
     if msg![env; this isMomentary] {
-        set_selected_segment(env, this, -1);
+        () = msg![env; this setSelectedSegmentIndex:(-1)];
     }
     msg_super![env; this endTrackingWithTouch:touch withEvent:event]
 }

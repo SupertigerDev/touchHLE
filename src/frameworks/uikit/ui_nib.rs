@@ -418,7 +418,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 /// depending on the NIB file format).
 /// The unarchiver should later be manually [release]d
 fn load_nib_file(env: &mut Environment, ui_nib: id, path: GuestPathBuf) -> Result<id, ()> {
-    let path = ns_string::from_rust_string(env, path.as_str().to_string());
+    let path_string = path.as_str().to_string();
+    let path = ns_string::from_rust_string(env, path_string.clone());
     assert!(msg![env; path isAbsolutePath]);
     let mut ns_data: id = msg_class![env; NSData dataWithContentsOfFile:path];
     if ns_data == nil {
@@ -426,6 +427,14 @@ fn load_nib_file(env: &mut Environment, ui_nib: id, path: GuestPathBuf) -> Resul
         // and objects.nib rather than a single file.
         let runtime_nib_name = get_static_str(env, "runtime.nib");
         let runtime_nib_path: id = msg![env; path stringByAppendingPathComponent:runtime_nib_name];
+        let runtime_nib_path_string = to_rust_string(env, runtime_nib_path).to_string();
+        log!(
+            "Nib archive {:?} isn't a file; checking package runtime archive {:?} (exists: {}, file: {})",
+            path_string,
+            runtime_nib_path_string,
+            env.fs.exists(crate::fs::GuestPath::new(&runtime_nib_path_string)),
+            env.fs.is_file(crate::fs::GuestPath::new(&runtime_nib_path_string))
+        );
         ns_data = msg_class![env; NSData dataWithContentsOfFile:runtime_nib_path];
         if ns_data != nil {
             log_dbg!(
@@ -439,7 +448,7 @@ fn load_nib_file(env: &mut Environment, ui_nib: id, path: GuestPathBuf) -> Resul
         // Info.plist, yet not have it point to a valid nib file?!
         log!(
             "Warning: couldn't load nib file or package runtime archive at {:?}",
-            path
+            path_string
         );
         return Err(());
     };
