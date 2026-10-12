@@ -86,6 +86,6 @@ else
     echo
     echo "  ./prepare-release.sh --create-zip-macos path/to/touchHLE.dmg -o touchHLE_vX.Y.Z_macOS_x86_x64.zip"
     echo "  ./prepare-release.sh --create-zip-windows path/to/touchHLE.exe -o touchHLE_vX.Y.Z_Windows_x86_64.zip"
-    echo "  ./prepare-release.sh --create-zip-android path/to/touchHLE.apk -o touchHLE_vX.Y.Z_Android_AArch64.zip"
+    echo "  ./prepare-release.sh --create-zip-android path/to/touchHLE.apk -o touchHLE_vX.Y.Z_Android_MultiArch.zip"
     exit 1
 fi
