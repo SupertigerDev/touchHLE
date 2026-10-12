@@ -14,7 +14,7 @@ These three platforms are [used by our GitHub Actions CI](../.github/workflows/t
 
 This platform is manually tested by certain developers:
 
-* Building for AArch64 and x64 Android on x64 macOS
+* Building for AArch64 Android on x64 macOS
 
 These should also work but aren't regularly tested:
 
@@ -73,6 +73,8 @@ touchHLE can also be dynamically linked (which means instead of using the bundle
 Open/import `android` project folder, click on build, then run
 
 #### With Gradle on the command line
+
+The release workflow produces one APK containing both supported Android ABIs.
 
 ```
 export ANDROID_NDK_HOME="path/to/ndk"
