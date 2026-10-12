@@ -10,11 +10,11 @@ These three platforms are [used by our GitHub Actions CI](../.github/workflows/t
 
 * Building for x64 Windows on x64 Windows
 * Building for x64 macOS on x64 macOS
-* Building for AArch64 Android on x64 Linux
+* Building for AArch64 and x64 Android on x64 Linux
 
 This platform is manually tested by certain developers:
 
-* Building for AArch64 Android on x64 macOS
+* Building for AArch64 and x64 Android on x64 macOS
 
 These should also work but aren't regularly tested:
 
@@ -48,7 +48,7 @@ All the general prerequisites apply for Android, and we recommend trying to buil
 
 You need three additional things for Android:
 
-1. Its Rust toolchain: `rustup target add aarch64-linux-android`
+1. Its Rust toolchains: `rustup target add aarch64-linux-android x86_64-linux-android`
 2. cargo-ndk: `cargo install cargo-ndk`
    - Important: make sure to use version 3.4.0 or later (can be checked with `cargo ndk -v`)
 3. The Android SDK and NDK. There's two options:
@@ -56,7 +56,7 @@ You need three additional things for Android:
     - Install "Command line tools only": https://developer.android.com/studio/index.html#command-line-tools-only
       - You might also need to install Gradle (check the version in `android/gradle/wrapper/gradle-wrapper.properties`)
 
-This has been tested on macOS 12.7.6 with Android Studio 2024.3.2 Patch 1 and NDK version 25.2.9519653.
+This has been tested on macOS 12.7.6 with Android Studio 2024.3.2 Patch 1 and NDK version 25.2.9519653. Android builds include AArch64 and x86_64; 32-bit ARM (`armeabi-v7a`, often reported as `armv8l`) is unsupported because Dynarmic does not support it as a host architecture.
 
 ## Building
 
@@ -91,7 +91,7 @@ If this step fails, try to debug first lib build only:
 export ANDROID_NDK_HOME="path/to/ndk"
 export ANDROID_SDK_HOME="path/to/sdk"
 
-cargo ndk -t arm64-v8a build
+cargo ndk -t arm64-v8a -t x86_64 build
 ```
 
 - on macOS when building with CLI, you may need to specify `ANDROID_NDK` as well (same value as `ANDROID_NDK_HOME`)

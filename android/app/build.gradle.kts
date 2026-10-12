@@ -60,15 +60,10 @@ android {
         externalNativeBuild {
             ndkBuild {
                 arguments("APP_PLATFORM=android-21")
-                // abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
-                // Only 'arm64-v8a' and 'x86_64' are supported by dynarmic
-                // and hence touchHLE. The 'x86_64' build works, but the main
-                // use for that would be the emulator in Android Studio, and
-                // its OpenGL ES implementations don't seem to work properly
-                // with touchHLE, so we disable it to reduce build time and
-                // avoid shipping stuff we haven't meaningfully tested.
+                // Dynarmic supports only 'arm64-v8a' and 'x86_64' as host
+                // architectures. OpenGL ES support on x86_64 devices may vary.
                 // Make sure this matches the cargoNdk targets below.
-                abiFilters("arm64-v8a")
+                abiFilters("arm64-v8a", "x86_64")
             }
         }
     }
@@ -149,7 +144,7 @@ android {
 
 cargoNdk {
     // Make sure this matches the android abiFilters above.
-    targets = arrayListOf("arm64")
+    targets = arrayListOf("arm64", "x86_64")
     module = ".."
     librariesNames = arrayListOf("libtouchHLE.so", "libSDL2.so", "libc++_shared.so")
     extraCargoEnv = mapOf(

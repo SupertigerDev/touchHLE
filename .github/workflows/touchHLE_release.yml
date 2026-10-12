@@ -54,8 +54,8 @@ jobs:
     - if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
       name: Extract Cmake
       run: tar xzvf "cmake-3.31.6-linux-x86_64.tar.gz" -C vendor && mv vendor/cmake-3.31.6-linux-x86_64 vendor/cmake
-    - name: Install AArch64 Android Rust toolchain
-      run: rustup target add aarch64-linux-android
+    - name: Install Android Rust toolchains
+      run: rustup target add aarch64-linux-android x86_64-linux-android
     - name: Install cargo-ndk
       run: cargo install cargo-ndk@3.5.4
     # Gradle version compatibility is a nightmare and we refuse to use gradlew.
@@ -112,7 +112,7 @@ jobs:
         CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
     - uses: actions/upload-artifact@v4
       with:
-        name: touchHLE_Android_AArch64
+        name: touchHLE_Android_MultiArch
         path: touchHLE.apk
 
   build-win:
